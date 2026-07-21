@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<!-- Bidirectional Monte-Carlo panel component (D-042, reworked for D-043).
+
+     One HTML file serves BOTH panel instances the app mounts:
+       · the FINANCE instance (args.corner true, args.heartbeat true) — profit + revenue|cost
+         fans, the in-panel corner UI, and the accumulation heartbeat;
+       · the MODEL-PATH instance (corner/heartbeat false) — the capability-gap fan.
+     Which charts appear, and in what arrangement, is the server's choice via args.grid:
+     a list of ROWS, each row a list of indices into args.charts. HARD RULE (Pavel): every
+     row holds exactly ONE chart — graphs are never placed side by side (e.g. [[0],[2],[3]]).
+
+     BACKGROUND PRECALC (D-043): with args.visible false the component draws nothing and
+     collapses to zero height, but the HEARTBEAT KEEPS TICKING — so Monte-Carlo accumulation
+     continues while the app shows the Point-forecast mode, and switching modes is instant.
+     Hidden renders reset `plotted`, so the first visible render is a clean newPlot at the
+     real width; visible re-renders go through Plotly.react on the EXISTING chart divs
+     (anti-blink contract of D-042 — neither milestone band refreshes nor ◀ ▶ sample steps
+     flash the charts).
+
+     Corner UI (finance instance only): a faint "n = k out of 100" count while accumulating,
+     replaced by the [◀][▶][⊙ sample] pills when done (arrows only while the sample is shown).
+     Implements the raw Streamlit component protocol (no build step): listens for
+     streamlit:render, reports corner clicks via streamlit:setComponentValue as
+     {show, idx, epoch, tick}. The epoch comes from the server and lets it ignore clicks that
+     predate an MC restart.
+
+     HEARTBEAT: while accumulation is unfinished (args.done false) the heartbeat instance
+     emits a value update (`tick`) every ~1.2s. Each tick is an ordinary widget event —
+     Streamlit reruns the app, and the app's Monte-Carlo worker draws the next batch on that
+     run. (The D-042 pause-while-dialog hold is retained but inert: the docked calibration
+     panel replaced every st.dialog, so the selector never matches.) -->
+<html>
+<head>
+<meta charset="utf-8" />
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: transparent;
+    font-family: "Source Sans Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      sans-serif; }
+  .wrap { position: relative; }
+  .row { display: grid; gap: 6px; }
+  .cell { min-width: 0; }
+  #corner { position: absolute; top: 2px; right: 6px; z-index: 30;
+    display: flex; gap: 6px; align-items: center; }
+  #corner .count { font-size: 12px; opacity: 0.55; padding: 2px 6px; }
+  #corner button { font-size: 12px; line-height: 1; padding: 4px 10px; border-radius: 12px;
+    border: 1px solid; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="corner"></div>
+  <div id="grid"></div>
+</div>
+<script>
+// ---- minimal Streamlit component protocol (raw postMessage; no component-lib build) ----
+function _send(type, data) {
+  window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, data), "*");
+}
+const Streamlit = {
+  ready: function () { _send("streamlit:componentReady", {apiVersion: 1}); },
+  setHeight: function (h) { _send("streamlit:setFrameHeight", {height: h}); },
+  setValue: function (v) { _send("streamlit:setComponentValue", {value: v, dataType: "json"}); },
+};
+
+let A = null;          // latest args.data from Python
+let plotted = false;   // first visible render -> newPlot; afterwards -> react (no flash)
+let gridSig = "";      // grid arrangement of the current DOM (rebuild on change)
+let hbTimer = null;    // heartbeat timer (armed while accumulating, heartbeat instance only)
+
+function sendValue(show, idx, tick) {
+  Streamlit.setValue({show: show, idx: idx, epoch: A ? A.epoch : -1,
+                      tick: tick || 0});
+}
+
+function dialogOpen() {
+  // Inert since D-043 removed every st.dialog (kept as a safety hold: a tick's full-app rerun
+  // would close an open dialog). Same-origin parent DOM access; cross-origin -> never block.
+  try {
+    return !!window.parent.document.querySelector('[data-testid="stDialog"]');
+  } catch (e) {
+    return false;
+  }
+}
+
+function armHeartbeat() {
+  if (hbTimer) { clearTimeout(hbTimer); hbTimer = null; }
+  if (!A || A.done || !A.heartbeat) return;
+  hbTimer = setTimeout(function beat() {
+    if (dialogOpen()) {          // re-check ~1s later instead of ticking (no rerun sent)
+      hbTimer = setTimeout(beat, 1000);
+      return;
+    }
+    sendValue(!!A.sampled, A.idx, Date.now());   // tick: draws the next batch server-side
+  }, 1200);
+}
+
+function layout(cfg, legend) {
+  const TH = A.theme;
+  // Compact geometry for the ~360px right chart panel (D-047): small heights and fonts.
+  // Title pinned to the container top, legend anchored just above the plot area, and a top
+  // margin tall enough for both — they used to share the y≈1 band and collide (QA S5).
+  return {
+    title: {text: cfg.title, x: 0, y: 1, yanchor: "top", yref: "container",
+            pad: {t: 4}, font: {size: 12, color: TH.fg}},
+    height: 232, margin: {l: 44, r: 8, t: 46, b: 28},
+    paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+    font: {color: TH.fg, size: 10},
+    showlegend: legend,
+    legend: {orientation: "h", yanchor: "bottom", y: 1.0, xanchor: "right", x: 1.0,
+             font: {size: 9}},
+    xaxis: {title: {text: "year", font: {size: 10}}, gridcolor: TH.grid,
+            zerolinecolor: TH.zero, color: TH.fg, automargin: true},
+    yaxis: {title: {text: cfg.ylab, font: {size: 10}}, gridcolor: TH.grid,
+            zerolinecolor: TH.zero, color: TH.fg, range: cfg.yrange, automargin: true},
+  };
+}
+
+function traces(cfg, legend) {
+  const t = A.t, out = [];
+  out.push({x: t, y: cfg.hi95, mode: "lines", line: {width: 0}, hoverinfo: "skip",
+            showlegend: false});
+  out.push({x: t, y: cfg.lo5, mode: "lines", line: {width: 0}, fill: "tonexty",
+            fillcolor: cfg.band_light, name: "5–95%", hoverinfo: "skip",
+            showlegend: legend});
+  out.push({x: t, y: cfg.hi75, mode: "lines", line: {width: 0}, hoverinfo: "skip",
+            showlegend: false});
+  out.push({x: t, y: cfg.lo25, mode: "lines", line: {width: 0}, fill: "tonexty",
+            fillcolor: cfg.band_mid, name: "25–75%", hoverinfo: "skip",
+            showlegend: legend});
+  out.push({x: t, y: cfg.med, mode: "lines",
+            line: {color: cfg.color, width: 2.5, dash: cfg.mdash},
+            name: "median", showlegend: legend});
+  if (A.sampled) {
+    out.push({x: t, y: A.sampled[cfg.key], mode: "lines",
+              line: {color: A.sample, width: 1.2, dash: "dot"},
+              name: "sample", showlegend: legend});
+  }
+  return out;
+}
+
+function ensureGrid() {
+  // (Re)build the row/cell DOM when the server's arrangement changes; otherwise keep the
+  // existing chart divs so Plotly.react updates in place.
+  const sig = JSON.stringify(A.grid);
+  if (sig === gridSig) return;
+  const g = document.getElementById("grid");
+  g.innerHTML = "";
+  A.grid.forEach(function (row, ri) {
+    const r = document.createElement("div");
+    r.className = "row";
+    r.style.gridTemplateColumns = "repeat(" + row.length + ", 1fr)";
+    row.forEach(function (ci) {
+      const c = document.createElement("div");
+      c.className = "cell";
+      c.innerHTML = '<div id="c' + ci + '"></div>';
+      r.appendChild(c);
+    });
+    g.appendChild(r);
+  });
+  gridSig = sig;
+  plotted = false;   // fresh divs -> next render must newPlot
+}
+
+function renderCharts() {
+  let first = true;
+  A.grid.flat().forEach(function (ci) {
+    const cfg = A.charts[ci];
+    const el = document.getElementById("c" + ci);
+    const legend = first;
+    first = false;
+    if (!plotted) {
+      Plotly.newPlot(el, traces(cfg, legend), layout(cfg, legend),
+                     {displayModeBar: false, responsive: true});
+    } else {
+      Plotly.react(el, traces(cfg, legend), layout(cfg, legend),
+                   {displayModeBar: false, responsive: true});
+    }
+  });
+  plotted = true;
+}
+
+function renderCorner() {
+  const c = document.getElementById("corner");
+  const TH = A.theme;
+  c.innerHTML = "";
+  if (!A.corner) return;             // path instance: no corner UI at all
+  if (!A.done) {                     // accumulating: the faint progress count, nothing else
+    const s = document.createElement("span");
+    s.className = "count";
+    s.style.color = TH.muted;
+    s.textContent = "n = " + (A.n_live != null ? A.n_live : A.n) + " out of " + A.cap;
+    c.appendChild(s);
+    return;
+  }
+  const showing = !!A.sampled, n = A.n, idx = A.idx;
+  const mk = function (txt, title, cb, active) {
+    const b = document.createElement("button");
+    b.textContent = txt;
+    b.title = title;
+    b.style.background = active ? TH.btn_border : TH.btn_bg;
+    b.style.color = TH.btn_fg;
+    b.style.borderColor = TH.btn_border;
+    b.onclick = cb;
+    return b;
+  };
+  if (showing) {                     // arrows sit LEFT of the anchored ⊙ button
+    c.appendChild(mk("◀", "previous draw", function () {
+      sendValue(true, (idx - 1 + n) % n);
+    }));
+    c.appendChild(mk("▶", "next draw", function () {
+      sendValue(true, (idx + 1) % n);
+    }));
+  }
+  c.appendChild(mk("⊙ sample",
+    "show/hide one inspected sample draw (thin dotted line on every chart); its sampled values " +
+    "appear as dashed ticks on the sidebar range controls",
+    function () { sendValue(!showing, idx); }, showing));
+}
+
+window.addEventListener("message", function (ev) {
+  const msg = ev.data;
+  if (!msg || msg.type !== "streamlit:render") return;
+  A = msg.args.data;
+  if (!A.visible) {
+    // background-precalc mode: draw nothing, take no space, but KEEP the heartbeat alive so
+    // accumulation continues; the next visible render starts clean (newPlot at real width).
+    plotted = false;
+    gridSig = "";
+    document.getElementById("grid").innerHTML = "";
+    document.getElementById("corner").innerHTML = "";
+    Streamlit.setHeight(0);
+    armHeartbeat();
+    return;
+  }
+  ensureGrid();
+  renderCharts();
+  renderCorner();
+  armHeartbeat();
+  Streamlit.setHeight(document.querySelector(".wrap").offsetHeight + 4);
+});
+Streamlit.ready();
+Streamlit.setHeight(0);
+</script>
+</body>
+</html>

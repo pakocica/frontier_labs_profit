@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Frontier-AI-lab competition — interactive explorer</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/browser@1.8.1/build/stlite.css" />
+  <style>
+    html, body, #root { margin: 0; padding: 0; height: 100%; }
+    #boot {
+      position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 0.6rem; z-index: 5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0e1117; color: #d8d8d2; text-align: center; padding: 0 1rem;
+    }
+    @media (prefers-color-scheme: light) { #boot { background: #ffffff; color: #31333f; } }
+    #boot .spin {
+      width: 26px; height: 26px; border-radius: 50%;
+      border: 3px solid rgba(128,128,128,0.25); border-top-color: #4c8dff;
+      animation: r 0.9s linear infinite;
+    }
+    @keyframes r { to { transform: rotate(360deg); } }
+    #boot small { opacity: 0.65; max-width: 34rem; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <div id="boot">
+    <div class="spin"></div>
+    <div>Loading the explorer…</div>
+    <small>This app runs Python entirely in your browser (stlite / Pyodide) — the first load
+      downloads the runtime and can take ~30&#8211;60 seconds. Nothing is sent to a server.</small>
+  </div>
+  <div id="root"></div>
+  <script type="module">
+    import { mount } from "https://cdn.jsdelivr.net/npm/@stlite/browser@1.8.1/build/stlite.js";
+    import { APP_FILES } from "./app_files.js";
+
+    // Mount every synced source file at its widget-relative path (src/ stripped).
+    const files = {};
+    for (const p of APP_FILES) {
+      files[p.replace(/^src\//, "")] = { url: "./" + p };
+    }
+
+    mount(
+      {
+        entrypoint: "app.py",
+        requirements: ["numpy", "plotly"],
+        files,
+        streamlitConfig: {
+          "theme.light.primaryColor": "#4c8dff",
+          "theme.dark.primaryColor": "#4c8dff",
+          "client.toolbarMode": "viewer",
+        },
+      },
+      document.getElementById("root"),
+    );
+
+    // Remove the boot cover once Streamlit has painted real content.
+    const boot = document.getElementById("boot");
+    const t0 = performance.now();
+    const iv = setInterval(() => {
+      const app = document.querySelector('[data-testid="stApp"], [data-testid="stAppViewContainer"]');
+      if (app && app.querySelector('[data-testid="stSidebar"]')) {
+        console.log("boot-to-first-paint: " + ((performance.now() - t0) / 1000).toFixed(1) + "s");
+        boot.remove();
+        clearInterval(iv);
+      }
+    }, 300);
+  </script>
+</body>
+</html>
