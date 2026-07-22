@@ -110,8 +110,10 @@
     '<div class="i-hook">' +
       '<div class="i-kicker">While the explorer boots in your browser — make a call</div>' +
       '<h1>Frontier AI labs lose billions every year.<br>Will the leading edge ever pay?</h1>' +
-      '<p class="i-sub">Frontier labs spend tens of billions a year training ever-better models, ' +
-        'while open-source rivals ~8&nbsp;months behind give away something almost as good. ' +
+      '<p class="i-sub">Frontier labs spend tens of billions a year training ever-better models. ' +
+        'Whether the frontier ever pays hinges on a tension: the physical buildout that drives it — ' +
+        'power, fabs, capital — must eventually slow, even as recursive self-improvement could ' +
+        'accelerate algorithmic progress. ' +
         "What's your prior?</p>" +
       '<div class="i-choices">' +
         '<button class="i-choice" data-k="soon"><b>Profitable within 5 years</b>' +
