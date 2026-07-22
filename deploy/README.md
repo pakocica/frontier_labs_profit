@@ -29,12 +29,25 @@ and `mc_component/index.html` into `src/`, and regenerates `app_files.js`
 automatically; if the widget ever grows files *outside* those locations
 (new top-level modules, new asset dirs), add a `cp` line to `sync.sh`.
 
+**The sync only ever writes `src/` and `app_files.js`.** The host layer at
+the repo root — `index.html` and the loading intro (`intro.js`, `intro.css`)
+— is deploy-repo-only and must survive every sync; `sync.sh` ends with a
+guard that fails if any of those three files is missing. When editing
+`intro.js`/`intro.css`, bump the `?v=N` query in `index.html` so GitHub
+Pages caches don't serve the stale version.
+
 GitHub Pages redeploys automatically on push (usually < 1 minute). Hard-reload
 the page (Cmd-Shift-R) to bypass cached assets when checking.
 
 ## What to check after an update
 
-Load the live URL, wait out the ~30–60 s Pyodide boot, then click through:
+Load the live URL. Whenever boot takes longer than the ~2.5 s grace window
+(any cold cache, and most warm reloads too — Python still has to boot even
+when the downloads are cached) the loading intro should appear: question +
+three answer cards; "How does the model think?" opens the 4-step primer; the
+progress ring turns green and becomes "Open the explorer" when boot
+completes. Repeat visits pre-mark the previously picked answer (saved in
+localStorage as `fl_guess`). Then wait out the boot and click through:
 level switch, Point forecast ↔ Monte Carlo, a slider move (charts react),
 a ⓘ calibration panel, and let the Monte-Carlo accumulation reach a
 milestone (bands appear at n = 10). The browser console should show no

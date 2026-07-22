@@ -1,0 +1,139 @@
+/* Loading-intro overlay (guess hook + optional model primer), shown while stlite boots.
+   Lives at the repo root with intro.js — OUTSIDE the src/ tree that deploy/sync.sh
+   rewrites. All rules are scoped under #intro so nothing leaks into the Streamlit app. */
+
+#intro {
+  --i-bg: #0e1117; --i-panel: #171c26; --i-panel2: #1e2431; --i-text: #e6e6df;
+  --i-muted: #9aa0ab; --i-accent: #4c8dff; --i-leader: #4c8dff; --i-follower: #ff9d45;
+  --i-line: #2a3140; --i-good: #3ecf8e;
+  /* Above Streamlit's own chrome: its sidebar/header sit at z-index ~999990. */
+  position: fixed; inset: 0; z-index: 1000000; background: var(--i-bg); color: var(--i-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  overflow-y: auto; padding: 1rem; transition: opacity .6s ease;
+}
+@media (prefers-color-scheme: light) {
+  #intro { --i-bg: #ffffff; --i-panel: #f4f6fa; --i-panel2: #eaeef5; --i-text: #31333f;
+           --i-muted: #6b7280; --i-line: #d8dee9; }
+}
+#intro.i-gone { opacity: 0; pointer-events: none; }
+#intro b { font-weight: 650; }
+#intro button { font-family: inherit; }
+
+/* ---------- minimal cover (instant paint; also the post-skip waiting state) ---------- */
+#intro .i-min { margin: auto; display: flex; flex-direction: column; align-items: center;
+  gap: .6rem; text-align: center; }
+#intro .i-min small { color: var(--i-muted); max-width: 34rem; line-height: 1.4; font-size: .78rem; }
+#intro .i-spin { width: 26px; height: 26px; border-radius: 50%;
+  border: 3px solid rgba(128,128,128,.25); border-top-color: var(--i-accent);
+  animation: i-rot .9s linear infinite; }
+@keyframes i-rot { to { transform: rotate(360deg); } }
+#intro .i-minbar { width: min(20rem, 80vw); height: 3px; border-radius: 2px;
+  background: var(--i-line); overflow: hidden; margin-top: .4rem; }
+#intro .i-minbar i { display: block; height: 100%; width: 0; background: var(--i-accent); }
+
+/* ---------- shared bits ---------- */
+#intro .i-kicker { font-size: .74rem; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--i-accent); margin-bottom: .8rem; }
+#intro .i-stage { font-size: .82rem; color: var(--i-muted); margin-top: .8rem; min-height: 1.1em; }
+#intro .i-privacy { font-size: .72rem; color: var(--i-muted); opacity: .75; margin-top: .4rem; }
+#intro .i-lead { color: var(--i-leader); font-weight: 600; }
+#intro .i-foll { color: var(--i-follower); font-weight: 600; }
+
+/* ---------- screen 1: the guess hook ---------- */
+#intro .i-hook { width: min(36rem, 92vw); text-align: center; margin: auto; padding: 1.5rem 0; }
+#intro .i-hook h1 { font-size: 1.65rem; line-height: 1.3; margin: 0 0 .6rem; }
+#intro .i-sub { font-size: .95rem; color: var(--i-muted); line-height: 1.55; margin: 0 0 1.5rem; }
+#intro .i-choices { display: flex; gap: .7rem; justify-content: center; flex-wrap: wrap;
+  margin-bottom: 1.3rem; }
+#intro .i-choice { background: var(--i-panel); border: 1px solid var(--i-line); color: var(--i-text);
+  border-radius: 10px; padding: .8rem 1.1rem; font-size: .88rem; cursor: pointer; max-width: 13rem; }
+#intro .i-choice:hover { border-color: var(--i-accent); }
+#intro .i-choice.i-picked { border-color: var(--i-accent); background: var(--i-panel2);
+  box-shadow: 0 0 0 1px var(--i-accent); }
+#intro .i-choice b { display: block; margin-bottom: .2rem; }
+#intro .i-choice span { font-size: .76rem; color: var(--i-muted); }
+#intro .i-dials { display: none; text-align: left; }
+#intro .i-dials.i-on { display: block; animation: i-fade .5s ease; }
+@keyframes i-fade { from { opacity: 0; transform: translateY(6px); } }
+#intro .i-dials h2 { font-size: 1.12rem; margin: .2rem 0 .9rem; text-align: center; }
+#intro .i-dial { display: flex; gap: .9rem; align-items: flex-start; background: var(--i-panel);
+  border: 1px solid var(--i-line); border-radius: 10px; padding: .8rem 1rem; margin-bottom: .7rem; }
+#intro .i-dial .i-num { flex: none; width: 1.7rem; height: 1.7rem; border-radius: 50%;
+  background: var(--i-panel2); color: var(--i-accent); font-weight: 700; display: flex;
+  align-items: center; justify-content: center; font-size: .85rem; }
+#intro .i-dial h3 { margin: 0 0 .25rem; font-size: .92rem; }
+#intro .i-dial p { margin: 0; font-size: .8rem; color: var(--i-muted); line-height: 1.5; }
+#intro .i-primerlink { display: inline-block; margin-top: .9rem; font-size: .86rem;
+  color: var(--i-accent); background: none; border: none; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 3px; }
+#intro .i-primerlink:hover { color: var(--i-text); }
+
+/* progress ring that morphs into the open button */
+#intro .i-ringwrap { position: relative; display: inline-flex; align-items: center;
+  justify-content: center; margin-top: 1rem; }
+#intro .i-ringwrap svg { transform: rotate(-90deg); }
+#intro .i-ring-bg { stroke: var(--i-line); fill: none; }
+#intro .i-ring-fg { stroke: var(--i-accent); fill: none; stroke-linecap: round;
+  transition: stroke-dashoffset .3s linear; }
+#intro .i-ringwrap button { position: absolute; background: none; border: none;
+  color: var(--i-muted); font-size: .78rem; width: 7.5rem; cursor: default; line-height: 1.35; }
+#intro .i-ringwrap.i-done .i-ring-fg { stroke: var(--i-good); }
+#intro .i-ringwrap.i-done button { color: var(--i-text); font-weight: 600; cursor: pointer; }
+
+/* ---------- screen 2: the model primer ---------- */
+#intro .i-primer { width: min(40rem, 92vw); margin: auto; padding: 1.2rem 0; display: none;
+  flex-direction: column; align-items: center; }
+#intro.i-show-primer .i-primer { display: flex; }
+#intro.i-show-primer .i-hook { display: none; }
+#intro .i-topnav { width: 100%; display: flex; justify-content: space-between;
+  margin-bottom: .8rem; }
+#intro .i-topnav button { background: none; border: none; color: var(--i-muted);
+  font-size: .82rem; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+#intro .i-topnav button:hover { color: var(--i-text); }
+#intro .i-card { width: 100%; background: var(--i-panel); border: 1px solid var(--i-line);
+  border-radius: 12px; padding: 1.5rem 1.7rem 1.1rem; margin-bottom: 1.1rem; }
+#intro .i-card h2 { font-size: 1.25rem; margin: 0 0 .7rem; }
+#intro .i-card p { font-size: .92rem; line-height: 1.55; margin: 0 0 .7rem; }
+#intro .i-card p.i-small { font-size: .8rem; color: var(--i-muted); }
+#intro .i-eq { font-family: "STIX Two Math", "Times New Roman", serif; font-size: 1.05rem;
+  text-align: center; background: var(--i-panel2); border-radius: 8px; padding: .55rem .8rem;
+  margin: .8rem 0; }
+#intro .i-eq .i-plain { font-size: .8rem; color: var(--i-muted);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+#intro .i-diagram { width: 100%; height: 130px; margin: .4rem 0 .6rem; }
+#intro .i-diagram .i-ax { stroke: var(--i-line); }
+#intro .i-diagram .i-ln-l { stroke: var(--i-leader); stroke-width: 2.5; fill: none; }
+#intro .i-diagram .i-ln-f { stroke: var(--i-follower); stroke-width: 2.5; fill: none; }
+#intro .i-diagram .i-gapfill { fill: var(--i-accent); opacity: .16; }
+#intro .i-diagram text { font-size: 11px; fill: var(--i-muted); }
+#intro .i-diagram .i-lt { fill: var(--i-leader); }
+#intro .i-diagram .i-ft { fill: var(--i-follower); }
+#intro .i-diagram .i-at { fill: var(--i-accent); }
+#intro .i-step { display: none; }
+#intro .i-step.i-on { display: block; animation: i-fade .35s ease; }
+#intro .i-ladder { display: flex; gap: .45rem; flex-wrap: wrap; margin: .6rem 0 .4rem; }
+#intro .i-rung { font-size: .75rem; border: 1px solid var(--i-line); border-radius: 999px;
+  padding: .28rem .7rem; color: var(--i-muted); }
+#intro .i-rung b { color: var(--i-text); font-weight: 600; }
+#intro .i-stepnav { display: flex; justify-content: space-between; align-items: center;
+  margin-top: .9rem; }
+#intro .i-stepnav .i-crumbs { font-size: .78rem; color: var(--i-muted); }
+#intro .i-navbtn { background: var(--i-panel2); color: var(--i-text);
+  border: 1px solid var(--i-line); border-radius: 8px; padding: .45rem .95rem;
+  font-size: .85rem; cursor: pointer; }
+#intro .i-navbtn:hover { border-color: var(--i-accent); }
+#intro .i-navbtn[disabled] { opacity: .35; cursor: default; }
+#intro .i-navbtn.i-primary { background: var(--i-accent); border-color: var(--i-accent);
+  color: #fff; font-weight: 600; animation: i-pulse 1.6s ease-in-out infinite; }
+@keyframes i-pulse { 50% { box-shadow: 0 0 0 7px rgba(76,141,255,.18); } }
+
+/* slim progress footer on the primer screen */
+#intro .i-footbar { width: 100%; }
+#intro .i-footbar .i-fstage { font-size: .78rem; color: var(--i-muted); margin-bottom: .4rem;
+  display: flex; justify-content: space-between; gap: 1rem; }
+#intro .i-footbar .i-ftrack { height: 4px; border-radius: 2px; background: var(--i-line);
+  overflow: hidden; }
+#intro .i-footbar .i-ffill { height: 100%; width: 0; background: var(--i-accent);
+  border-radius: 2px; transition: width .3s linear; }

@@ -15,6 +15,10 @@ runtime and takes ~30–60 seconds.
 
 - `index.html` — the stlite host page (loads `@stlite/browser` from jsdelivr,
   mounts the files listed in `app_files.js`, boots `app.py`).
+- `intro.js`, `intro.css` — the first-load intro overlay (a "make a call"
+  question plus an optional 4-step model primer) shown while Python boots;
+  progress is driven by real download milestones. Boots that finish within a
+  short grace window skip it. Root-level, **never touched by `deploy/sync.sh`**.
 - `app_files.js` — generated manifest of the mounted source files.
 - `src/` — the widget sources, synced verbatim from the research repo
   (`app.py`, `ui/` modules, `model_notebook.ipynb` — the single source of

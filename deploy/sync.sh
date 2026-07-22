@@ -26,5 +26,12 @@ cp "$SRC/mc_component/index.html" "$REPO/src/mc_component/"
   echo "];"
 } > "$REPO/app_files.js"
 
+# Guard: the host layer — index.html and the loading intro (intro.js/intro.css) — lives
+# at the repo ROOT, outside src/, and this script must never touch it. Fail loudly if any
+# of it has gone missing so a bad sync can't silently ship a page without the intro.
+for f in index.html intro.js intro.css; do
+  [ -f "$REPO/$f" ] || { echo "error: $REPO/$f is missing — the root host/intro layer was clobbered; restore it before pushing"; exit 1; }
+done
+
 echo "synced from: $SRC"
 (cd "$REPO" && git status --short) || true
