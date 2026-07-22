@@ -6,6 +6,7 @@ import numpy as np
 import streamlit as st
 
 from .content import INTERP, INTERP_T, TSPEC, _sub_live
+from .equations import sidebar_filter_keys
 from .levels import apply_level_pins
 from .mc import _inspected_params
 from .model_access import m, P0, TDEF
@@ -21,6 +22,16 @@ def render(LEVEL):
     Params(**d) consumes (every parameter explicitly set — pins included, no fallbacks)."""
     MC_ACTIVE = mc_active()
     d = {}  # parameter dict passed to Params(**d)
+    S = st.session_state
+
+    # ---- equation-driven parameter filter (D-048): by default only the parameters that
+    # appear in the currently visible equations subsections get a row; hidden rows fall back
+    # to their remembered spot values (sv_ shadows), so the effective dict d stays complete
+    # and MC ranges/modes survive. None = show all (Introduction tab, or the override below).
+    allowed = sidebar_filter_keys(LEVEL)
+
+    def _vis(*keys):
+        return allowed is None or any(k in allowed for k in keys)
 
     # ---- row builders (closures over d / LEVEL / MC_ACTIVE) --------------------------
     def _mode_tick(container, ekey):
@@ -111,16 +122,24 @@ def render(LEVEL):
     def _param(container, key, label, lo, hi, step, **kw):
         """Compact 3-line row (D-043): label+value+ⓘ, keyed slider (collapsed label) with a
         per-slider ↺ reset. Never hardcodes a default: the seed value is `getattr(P0, key)`,
-        clipped into range."""
+        clipped into range. Filtered-out rows (D-048) render nothing but still feed d from
+        the sv_ shadow (widget keys are GC'd when a widget skips a run; sv_ is not)."""
         interp = _sub_live(INTERP.get(key), d)
         default = float(np.clip(getattr(P0, key), lo, hi))
         sampled = key in m.PARAM_RANGES     # an MC dimension
         wkey = f"w_{key}"
+        if not _vis(key):
+            cur = float(np.clip(float(S.get(wkey, S.get(f"sv_{key}", default))), lo, hi))
+            d[key] = cur
+            S[f"sv_{key}"] = cur
+            S[f"_spoton_{key}"] = False     # re-show restores the spot from sv_ (D-041 trap)
+            return None
         if sampled:
             _reg(f"sv_{key}", default)
             st.session_state.setdefault("_wdefaults", {})[wkey] = default
         else:
-            _reg(wkey, default)
+            # seed from the sv_ shadow (not the default) so hide → re-show keeps the value
+            _reg(wkey, float(np.clip(S.get(f"sv_{key}", default), lo, hi)))
         row = container.container(key=f"row_{key}")
         cur = st.session_state.get(wkey, st.session_state.get(f"sv_{key}", default))
         _row_head(row, label, f"{float(cur):g}", key)
@@ -141,22 +160,28 @@ def render(LEVEL):
                 st.session_state[f"_spoton_{key}"] = True
             d[key] = sc.slider(label, lo, hi, step=step, key=wkey, help=interp,
                                label_visibility="collapsed", **kw)
-            if sampled:
-                st.session_state[f"sv_{key}"] = float(d[key])
+            st.session_state[f"sv_{key}"] = float(d[key])   # shadow survives filtering/GC
         rc.button("↺", key=f"r_{key}", help="reset value, mode and sampling range",
                   on_click=_reset_full, args=(wkey, default, key if sampled else None))
         return row
 
-    def _target_row(container, tkey, panel_key):
+    def _target_row(container, tkey, panel_key, visible=True):
         """Target control (bounds/default from the notebook's TARGET_RANGES/target_defaults) + ↺,
         dual-mode (D-041): RANGE mode renders the two-ended MC sampling range and returns the
         remembered spot value (which drives the deterministic paths, and renders as the ghost
         bullet on the track); SPOT mode is the single-value slider used everywhere.
         Compact 3-line row (D-043); `panel_key` is the parameter the row's ⓘ opens in the
-        docked calibration panel. Returns (value, row_container)."""
+        docked calibration panel. Returns (value, row_container) — row is None when the row
+        is filtered out (D-048), with the value served from the sv_ shadow."""
         label, step, fmt = TSPEC[tkey]
         lo, hi = _tbounds(tkey)
         default = float(np.clip(TDEF[tkey], lo, hi))
+        wkey = f"w_{tkey}"
+        if not visible:
+            v = float(np.clip(float(S.get(wkey, S.get(f"sv_{tkey}", default))), lo, hi))
+            S[f"sv_{tkey}"] = v
+            S[f"_spoton_{tkey}"] = False    # re-show restores the spot from sv_ (D-041 trap)
+            return v, None
         _reg(f"sv_{tkey}", default)
         wkey = f"w_{tkey}"
         st.session_state.setdefault("_wdefaults", {})[wkey] = default   # ↺ / Reset-all target
@@ -193,8 +218,10 @@ def render(LEVEL):
         the ⚙ raw-parameter unlock was removed by Pavel's D-042 ruling). The caption shows the
         implied parameter live: a point in SPOT mode, the IMAGE OF THE CURRENT SAMPLING RANGE in
         range mode (endpoints ordered numerically; the ghost bullet on the track carries the spot)."""
-        v, row = _target_row(container, tkey, panel_key=pkey)
+        v, row = _target_row(container, tkey, panel_key=pkey, visible=_vis(pkey))
         d[pkey] = derive(v)
+        if row is None:                     # filtered out (D-048) — value only, no caption
+            return
         if MC_ACTIVE and _range_mode(tkey) and rngcapfn is not None:
             rlo, rhi = _active_span(tkey)
             a, b = sorted((derive(float(rlo)), derive(float(rhi))))
@@ -213,6 +240,17 @@ def render(LEVEL):
     # The reset registry is rebuilt from scratch each run, so it always lists exactly the controls the
     # current level shows. (Clear BEFORE any keyed widget is created.)
     st.session_state["_wdefaults"] = {}
+    # D-048: unobtrusive override for the equation-driven filter (only shown while the filter
+    # is active, i.e. the Equations tab is up); a plain mem key preserves the preference
+    # across the widget's GC when the tab switches away.
+    if allowed is not None:
+        _reg("w_all_params", bool(S.get("_all_params_mem", False)))
+        if st.sidebar.checkbox("show all parameters", key="w_all_params",
+                               help="The left panel is filtered to the parameters of the "
+                                    "equations currently shown in the middle pane. Tick to "
+                                    "see every parameter of this level instead."):
+            allowed = None
+        S["_all_params_mem"] = allowed is None
     st.sidebar.button("↺ Reset all to defaults", use_container_width=True, on_click=_reset_all,
                       help="Return every visible control to its notebook default.")
 
@@ -226,7 +264,8 @@ def render(LEVEL):
     # -------------------------------------------------- Level 1: Basics (always visible)
     # D-037 targets-first: the Basics controls are OBSERVABLES; the caption under each shows the
     # implied parameter(s), recomputed live.
-    sb.subheader("Basics")
+    if _vis("g_C0", "nu", "theta", "S0", "delta_total", "Delta0", "delta_dev", "delta_rel"):
+        sb.subheader("Basics")
     _tparam(sb, "t_compute_x", "g_C0",
             lambda v: float(np.log10(v)),
             lambda x: f"⇒ ${_gc_sym()}$ = {x:.3f} OOM/yr",
@@ -245,7 +284,9 @@ def render(LEVEL):
                float(np.log10(st.session_state.get("sv_t_algo_x",
                               st.session_state.get("w_t_algo_x", TDEF["t_algo_x"])))))
     _lag, _lag_row = _target_row(sb, "t_lag_mo",
-                                 panel_key=("delta_total" if LEVEL <= 5 else "Delta0"))
+                                 panel_key=("delta_total" if LEVEL <= 5 else "Delta0"),
+                                 visible=_vis("delta_total", "Delta0", "delta_dev",
+                                              "delta_rel"))
     _speed = d["g_C0"] + _ga_now
     d["Delta0"] = _lag / 12.0 * _speed
     _lag_rng = MC_ACTIVE and _range_mode("t_lag_mo")
@@ -283,18 +324,21 @@ def render(LEVEL):
             _cap = (f"⇒ $\\Delta_0$ = {d['Delta0']:.2f} OOM · $\\delta_{{dev}}$ = "
                     f"{d['delta_dev']:.2f} · $\\delta_{{rel}}$ = {d['delta_rel']:.2f}/yr — "
                     "the lag stays constant")
-    _lag_row.caption(_cap)
+    if _lag_row is not None:
+        _lag_row.caption(_cap)
 
     # -------------------------------------------------- Level 2: Training in advance
     if 2 <= LEVEL <= 7:   # ℓ unpins here; at L8 it moves into the Cost mechanism group
-        sb.subheader("Training in advance")
+        if _vis("ell"):
+            sb.subheader("Training in advance")
         _param(sb, "ell", "$\\ell$  lead time (yr)", 0.25, 3.0, 0.05)
 
     apply_level_pins(d, LEVEL)
 
     # -------------------------------------------------- Level 3: Growth engine
     if LEVEL >= 3:
-        sb.subheader("Growth engine")
+        if _vis("g_a"):
+            sb.subheader("Growth engine")
         _tparam(sb, "t_algo_x", "g_a",
                 lambda v: float(np.log10(v)),
                 lambda x: f"⇒ $g_a$ = {x:.3f} OOM/yr",
@@ -302,7 +346,8 @@ def render(LEVEL):
 
     # -------------------------------------------------- Level 4: Compute slowdown
     if LEVEL >= 4:
-        sb.subheader("Compute slowdown")
+        if _vis("g_C_inf"):
+            sb.subheader("Compute slowdown")
         _tparam(sb, "t_floor_x", "g_C_inf",
                 lambda v: float(np.log10(v)),
                 lambda x: f"⇒ $g_{{c\\infty}}$ = {x:.2f} OOM/yr",
@@ -312,7 +357,8 @@ def render(LEVEL):
     # Δ0, δ_dev, δ_rel are driven by the Follower-lag target in Basics (wedge-split inversion); the
     # follower's OWN engine stays raw and feeds the lag caption's wedge live.
     if LEVEL >= 6:
-        sb.subheader("Catch-up channels — follower engine")
+        if _vis("g_a_F", "g_CF0", "g_CF_inf", "xi_F"):
+            sb.subheader("Catch-up channels — follower engine")
         _param(sb, "g_a_F", "$g_a^F$  algo rate (OOM/yr)", 0.1, 0.6, 0.01)
         _param(sb, "g_CF0", "$g_{c0}^F$  growth today (OOM/yr)", 0.2, 0.8, 0.05)
         _param(sb, "g_CF_inf", "$g_{c\\infty}^F$  growth floor (OOM/yr)", 0.0, 0.4, 0.01)
@@ -320,25 +366,29 @@ def render(LEVEL):
 
     # -------------------------------------------------- Level 7: Release delay
     if LEVEL >= 7:
-        sb.subheader("Release delay")
         _tau_def = int(round(np.clip(P0.tau * 12, 0, 3)))
-        _twk = _reg("w_tau_mo", _tau_def)
-        _trow = sb.container(key="row_tau")
-        _row_head(_trow, "$\\tau$  release delay (months)",
-                  f"{int(st.session_state.get(_twk, _tau_def))} mo", "tau")
-        _tsc, _trc = _trow.columns([6, 1], vertical_alignment="bottom")
-        tau_mo = _tsc.slider("$\\tau$  release delay (months)", 0, 3, step=1, key=_twk,
-                             help=INTERP["tau"], label_visibility="collapsed")
-        _trc.button("↺", key="r_tau", help="reset to default", on_click=_reset_one,
-                    args=(_twk, _tau_def))
-        d["tau"] = tau_mo / 12.0
+        if _vis("tau"):
+            sb.subheader("Release delay")
+            _twk = _reg("w_tau_mo", _tau_def)
+            _trow = sb.container(key="row_tau")
+            _row_head(_trow, "$\\tau$  release delay (months)",
+                      f"{int(st.session_state.get(_twk, _tau_def))} mo", "tau")
+            _tsc, _trc = _trow.columns([6, 1], vertical_alignment="bottom")
+            tau_mo = _tsc.slider("$\\tau$  release delay (months)", 0, 3, step=1, key=_twk,
+                                 help=INTERP["tau"], label_visibility="collapsed")
+            _trc.button("↺", key="r_tau", help="reset to default", on_click=_reset_one,
+                        args=(_twk, _tau_def))
+            d["tau"] = tau_mo / 12.0
+        else:
+            d["tau"] = int(S.get("w_tau_mo", _tau_def)) / 12.0
 
     # -------------------------------------------------- Level 8: Cost mechanism
     # The base cost is ALREADY the compute-path mechanism with φ_RD pinned to 0 (see the pins above).
     # Level 8 ADDS the R&D overhead φ_RD and frees the price-decline dial g_p; ℓ moves here from the
     # Training-in-advance group.
     if LEVEL >= 8:
-        sb.subheader("Cost mechanism")
+        if _vis("phi_RD", "ell", "g_p"):
+            sb.subheader("Cost mechanism")
         _param(sb, "phi_RD", "$\\phi_{RD}$  R&D markup", 0.0, 2.5, 0.1)
         _param(sb, "ell", "$\\ell$  lead time (yr)", 0.25, 3.0, 0.05)
         _tparam(sb, "t_bill_x", "g_p",
@@ -353,11 +403,17 @@ def render(LEVEL):
     # Dials with NO clean observable (grades C/F) — judgment calls, not targets. Grouped here so the
     # targets-first sidebar reads intentional: observables above, internals below.
     if LEVEL >= 3:
-        sb.subheader("Model internals (no clean observable)")
-        freeze = sb.checkbox("Freeze AI assistance ($\\gamma = 0$)", key=_reg("w_freeze",
-                             bool(P0.gamma == 0.0)),
-                             help="Turns off the $\\psi$ RSI feedback. $\\gamma$ above ~0.42 goes "
-                                  "super-exponential inside the horizon (spec N4).")
+        if _vis("gamma", "rho0", "xi", "x_mid", "split"):
+            sb.subheader("Model internals (no clean observable)")
+        if _vis("gamma"):
+            freeze = sb.checkbox("Freeze AI assistance ($\\gamma = 0$)", key=_reg("w_freeze",
+                                 bool(S.get("_freeze_mem", P0.gamma == 0.0))),
+                                 help="Turns off the $\\psi$ RSI feedback. $\\gamma$ above "
+                                      "~0.42 goes super-exponential inside the horizon "
+                                      "(spec N4).")
+            S["_freeze_mem"] = bool(freeze)   # survives the widget's GC while filtered out
+        else:
+            freeze = bool(S.get("_freeze_mem", S.get("w_freeze", P0.gamma == 0.0)))
         if freeze:
             d["gamma"] = 0.0
         else:

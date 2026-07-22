@@ -135,14 +135,21 @@ def inject_layout_css():
     calibration panel and folded-pane strip columns (Streamlit columns are proportional, so
     the fixed widths are imposed on the column that CONTAINS the keyed container), and the
     compact sidebar row rhythm."""
-    # the sticky bar needs an OPAQUE theme-matched background (content scrolls under it);
-    # `--background-color` is not a defined CSS var in Streamlit 1.59, so resolve the app
-    # theme server-side (same best-effort read the MC component uses)
+    # the sticky bar needs an OPAQUE theme-matched background (content scrolls under it) and
+    # the right chart panel the SIDEBAR's background; `--background-color` is not a defined
+    # CSS var in Streamlit 1.59, so resolve the app theme server-side (same best-effort read
+    # the MC component uses). Streamlit default secondary backgrounds: light #f0f2f6,
+    # dark #262730.
     try:
-        topbar_bg = "#ffffff" if getattr(st.context.theme, "type", None) == "light" \
-            else "#0e1117"
+        _light = getattr(st.context.theme, "type", None) == "light"
     except Exception:
-        topbar_bg = "#0e1117"
+        _light = False
+    topbar_bg = "#ffffff" if _light else "#0e1117"
+    panel_bg = "#f0f2f6" if _light else "#262730"
+    # D-048: when the right panel is open, the header and the top strip stop at its edge
+    charts_on = bool(st.session_state.get("_charts_open", True))
+    header_right = "16rem" if charts_on else "0px"
+    topbar_mr = "15.5rem" if charts_on else "0.5rem"
     css = """
         <style>
           /* frozen top bar. Streamlit wraps every element in a stLayoutWrapper exactly its
@@ -169,13 +176,39 @@ def inject_layout_css():
           [data-testid="stHorizontalBlock"]:has(.st-key-mainpane),
           [data-testid="stHorizontalBlock"]:has(.st-key-calpanel)
             { flex-wrap: nowrap !important; }
-          /* the right chart panel: fixed 360px (a little wider than the ~300px sidebar),
-             graphs small and stacked; collapsed it becomes a 52px strip and the freed width
-             flows to the flexible middle pane automatically */
+          /* D-048: the right chart panel MIRRORS the sidebar — full height from the very top
+             of the window, the sidebar's background, the sidebar's default width (16rem).
+             The fixed panel sits out of flow; the spacer column below reserves its footprint
+             inside the block, so the middle pane ends a gutter before it. Collapsed, only a
+             floating « control remains (mirror of the sidebar's ») and the freed width flows
+             to the flexible middle pane. */
+          .st-key-chartscol {
+            position: fixed; top: 0; right: 0; width: 16rem;
+            height: 100vh; overflow-y: auto; overflow-x: hidden; z-index: 99;
+            background-color: __PANEL_BG__;
+            border-left: 1px solid rgba(128,128,128,0.2);
+            padding: 0.4rem 0.7rem 1.2rem; }
           [data-testid="stColumn"]:has(.st-key-chartscol) {
-            flex: 0 0 360px !important; min-width: 360px !important; }
+            flex: 0 0 15.5rem !important; min-width: 15.5rem !important; }
           [data-testid="stColumn"]:has(.st-key-chartsstrip) {
-            flex: 0 0 52px !important; min-width: 52px !important; }
+            flex: 0 0 0px !important; min-width: 0px !important; }
+          .st-key-chartsstrip {
+            position: fixed; top: 0.55rem; right: 3.4rem; z-index: 999995; }
+          .st-key-chartsstrip button
+            { border: none; background: transparent; padding: 0.15rem 0.4rem;
+              font-size: 1.05rem; line-height: 1.2; opacity: 0.65; }
+          .st-key-chartsstrip button:hover { opacity: 1; color: #4c8dff; }
+          /* the Streamlit header stops where the right panel begins (it already starts after
+             the sidebar) — the ⋮ menu stays reachable left of the panel */
+          header[data-testid="stHeader"] { right: __HEADER_RIGHT__ !important;
+            width: auto !important; }
+          /* the top strip belongs to the MIDDLE area only (width calc, not margin — the
+             wrapper is width:100%, so a margin would overflow instead of shrinking it) */
+          [data-testid="stLayoutWrapper"]:has(> .st-key-topbar)
+            { width: calc(100% - __TOPBAR_MR__) !important; }
+          /* top strip: level selector left, mode switch flush right */
+          .st-key-topbar [data-testid="stSegmentedControl"]
+            { display: flex; justify-content: flex-end; }
           /* the middle tabbed pane = the flexible remainder */
           [data-testid="stColumn"]:has(.st-key-mainpane) {
             flex: 1 1 0 !important; min-width: 320px !important; }
@@ -192,26 +225,26 @@ def inject_layout_css():
             { margin-left: auto; }
           .st-key-calpanel { border-right: 1px solid rgba(128,128,128,0.25);
             padding-right: 10px; }
-          /* independent scroll containers: the pane, the panel and the charts each scroll on
-             their own (viewport height minus the chrome above the row: header 3.75rem +
-             block padding 4.2rem + top bar ~3rem + gap 1rem + breathing ≈ 12.5rem);
-             the max() keeps very short windows usable (the page then scrolls normally) */
+          /* independent scroll containers: the pane and the cal panel scroll on their own
+             (the chart panel scrolls itself — it is fixed full-height above). Height =
+             viewport minus the chrome above the row (header 3.75rem + block padding 4.2rem
+             + top bar ~3rem + gap 1rem + breathing ≈ 12.5rem); the max() keeps very short
+             windows usable (the page then scrolls normally) */
           [data-testid="stColumn"]:has(.st-key-mainpane),
-          [data-testid="stColumn"]:has(.st-key-calpanel),
-          [data-testid="stColumn"]:has(.st-key-chartscol) {
+          [data-testid="stColumn"]:has(.st-key-calpanel) {
             height: max(calc(100vh - 12.5rem), 320px);
             overflow-y: auto; overflow-x: hidden; }
 
-          /* fold strips (the folded tabbed pane, the collapsed chart panel): thin vertical
-             click targets */
+          /* the folded tabbed-pane strip: a thin vertical click target */
           [data-testid="stColumn"]:has(.st-key-eqstrip) {
             flex: 0 0 52px !important; min-width: 52px !important; }
-          .st-key-eqstrip button, .st-key-chartsstrip button
+          .st-key-eqstrip button
             { writing-mode: vertical-rl; height: 340px; width: 38px;
               padding: 10px 2px; font-size: 12px; color: inherit; opacity: 0.75; }
-          .st-key-eqstrip button:hover, .st-key-chartsstrip button:hover { opacity: 1; }
-          /* the chart panel's collapse chevron: a small right-aligned glyph */
-          .st-key-chartshide { display: flex; justify-content: flex-end; }
+          .st-key-eqstrip button:hover { opacity: 1; }
+          /* the chart panel's collapse chevron: top-LEFT of the panel (mirror image of the
+             sidebar's « at its top-right) */
+          .st-key-chartshide { display: flex; justify-content: flex-start; }
           .st-key-chartshide button
             { border: none; background: transparent; padding: 0 4px; min-height: 1.2rem;
               line-height: 1.2; font-size: 0.9rem; opacity: 0.6; }
@@ -222,6 +255,13 @@ def inject_layout_css():
             { border: none; background: transparent; padding: 0 2px; min-height: 1.2rem;
               line-height: 1.2; font-size: 0.85rem; opacity: 0.65; }
           [class*="st-key-ieq_"] button:hover { opacity: 1; color: #4c8dff; }
+          /* the ⌖ click-to-highlight glyph in each equations subsection (D-048) */
+          [class*="st-key-eqhl_"] { display: flex; justify-content: flex-end;
+            margin-top: -0.4rem; }
+          [class*="st-key-eqhl_"] button
+            { border: none; background: transparent; padding: 0 2px; min-height: 1.2rem;
+              line-height: 1.2; font-size: 0.95rem; opacity: 0.6; }
+          [class*="st-key-eqhl_"] button:hover { opacity: 1; color: #4c8dff; }
 
           /* compact sidebar rows: tighter vertical rhythm + flush label lines */
           section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: 0.55rem; }
@@ -248,18 +288,25 @@ def inject_layout_css():
             { opacity: 1; color: #4c8dff; }
         </style>
         """
-    st.markdown(css.replace("__TOPBAR_BG__", topbar_bg), unsafe_allow_html=True)
+    st.markdown(css.replace("__TOPBAR_BG__", topbar_bg)
+                   .replace("__PANEL_BG__", panel_bg)
+                   .replace("__HEADER_RIGHT__", header_right)
+                   .replace("__TOPBAR_MR__", topbar_mr), unsafe_allow_html=True)
 
 
-def inject_cal_emphasis_css(row_key):
-    """While the calibration panel is open: dim every sidebar row (~40%) except the one the
-    panel is about, which gets a tint + outline (D-043)."""
+def inject_cal_emphasis_css(row_keys):
+    """Dim every sidebar row (~40%) except the emphasized one(s), which get a tint + outline.
+    Used by the calibration panel (one row, D-043) and by the equations click-to-highlight
+    (a subsection's whole parameter set, D-048). Accepts one row key or an iterable."""
+    if isinstance(row_keys, str):
+        row_keys = [row_keys]
+    sel = ", ".join(f'section[data-testid="stSidebar"] .st-key-{rk}' for rk in row_keys)
     st.markdown(
         f"""
         <style>
           section[data-testid="stSidebar"] [class*="st-key-row_"]
             {{ opacity: 0.4; transition: opacity 0.15s; }}
-          section[data-testid="stSidebar"] .st-key-{row_key}
+          {sel}
             {{ opacity: 1 !important; background: rgba(76,141,255,0.10);
                outline: 2px solid rgba(76,141,255,0.40); }}
         </style>

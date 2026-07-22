@@ -323,12 +323,13 @@ def _hood_section(p, hl):
 
 
 def _charts_strip(mc_key, LEVEL):
-    """The thin vertical strip the RIGHT chart panel collapses into (D-047 — symmetric to the
-    pane's fold strip). The finance MC component stays mounted HIDDEN here, so the background
-    accumulation keeps ticking while the charts are away."""
+    """The collapsed state of the RIGHT chart panel (D-048): just a floating « control at the
+    window's top right — the mirror image of the collapsed sidebar's » control. The finance
+    MC component stays mounted HIDDEN here, so the background accumulation keeps ticking
+    while the charts are away."""
     with st.container(key="chartsstrip"):
-        st.button("◂ Charts", key="charts_open_btn", on_click=open_charts,
-                  help="reopen the chart panel")
+        st.button("«", key="charts_open_btn", on_click=open_charts,
+                  help="open the chart panel")
         if mc_panel_fin(mc_key, visible=False, show_blowup=(LEVEL >= 3)):
             st.rerun()
 
@@ -393,6 +394,22 @@ def render_main(d, items, sim, hl, p, LEVEL):
         with scol:
             _pane_strip()
     else:
+        # equations click-to-highlight (D-048): light up the ⌖-selected subsection's rows,
+        # scrolling the sidebar to the first of them once per selection change
+        hl = st.session_state.get("_eq_hl")
+        if hl:
+            from .equations import subsection_param_entries
+            keys = [k for k, _ in subsection_param_entries(hl, LEVEL)]
+            if keys:
+                rows = []
+                for k in keys:                      # de-duped, sidebar order = map order
+                    rk = calpanel.param_row_key(k)
+                    if rk not in rows:
+                        rows.append(rk)
+                theme.inject_cal_emphasis_css(rows)
+                if st.session_state.get("_eq_hl_scrolled") != hl:
+                    calpanel._autoscroll(rows[0])
+                    st.session_state["_eq_hl_scrolled"] = hl
         lcol, ccol = st.columns([1.0, 0.5], gap="small")
         with lcol:
             _tabbed_pane(d, p, LEVEL)

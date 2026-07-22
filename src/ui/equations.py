@@ -5,7 +5,7 @@ base-model profitability race (levels 1–4).
 import streamlit as st
 
 from .calibration import _cal_cards, _cal_delta_merged
-from .state import _gc_sym, _reg
+from .state import _gc_sym, _reg, toggle_eq_hl
 
 
 def _eqcols():
@@ -92,6 +92,79 @@ _CHANGED_AT = {2: "cost", 3: "leader_algo", 4: "leader_compute", 5: "value", 6: 
                7: "revenue", 8: "cost", 9: "extensions"}
 
 
+# ---- D-048: the ONE authoritative subsection → parameters map ------------------------------
+# (param_key, pinned) pairs whose calibration cards ride in each subsection at each level.
+# The render code below consumes it AND the sidebar's equation-driven filter reads it — keep
+# it as explicit data here, never as scattered conditionals.
+def subsection_param_entries(sub_id, level):
+    if sub_id == "leader_compute":
+        cards = [("g_C0", False)]
+        if level >= 4:
+            cards += [("g_C_inf", False), ("xi", False)]
+        return cards
+    if sub_id == "leader_algo":
+        cards = [("g_a", level < 3)]
+        if level >= 3:
+            cards += [("rho0", False), ("gamma", False)]
+        if level >= 9:
+            cards += [("alpha", False), ("eta", False)]
+        return cards
+    if sub_id == "follower":
+        if level <= 5:
+            return [("delta_total", False)]
+        return [("delta_dev", False), ("delta_rel", False), ("Delta0", False),
+                ("split", False), ("g_a_F", False), ("g_CF0", False), ("g_CF_inf", False),
+                ("xi_F", False)]
+    if sub_id == "value":
+        cards = [("nu", False)]
+        if level >= 5:
+            cards.append(("x_mid", False))
+        cards.append(("W0", level < 9))
+        return cards
+    if sub_id == "revenue":
+        cards = [("theta", False)]
+        if level >= 7:
+            cards.append(("tau", False))
+        return cards
+    if sub_id == "cost":
+        cards = []
+        if level >= 8:
+            cards.append(("phi_RD", False))
+        cards.append(("S0", False))
+        if level >= 2:
+            cards.append(("ell", False))
+        cards.append(("g_p", level < 8))
+        return cards
+    return []   # profit, extensions: no parameter cards
+
+
+def eq_show_all(level):
+    """Effective show-all state: at L1 everything is new, so ALL subsections show and the
+    toggle is hidden (D-048); above L1 the 'show all equations' checkbox decides."""
+    return True if level == 1 else bool(st.session_state.get("w_eq_all", False))
+
+
+def visible_subsections(level):
+    """The subsections the Equations tab currently renders (concise → only the changed one)."""
+    changed = _CHANGED_AT.get(level)
+    existing = [s for s in _SUB_ORDER if not (s == "extensions" and level < 9)]
+    if not eq_show_all(level) and changed is not None:
+        return [changed]
+    return existing
+
+
+def sidebar_filter_keys(level):
+    """The parameter keys whose sidebar rows should show under the equation-driven filter
+    (D-048): the parameters of the currently visible subsections. None = show ALL (the
+    middle tab is Introduction — no equations on screen to filter by)."""
+    if st.session_state.get("_pane_tab_mem", "Introduction") != "Equations":
+        return None
+    keys = set()
+    for sub_id in visible_subsections(level):
+        keys |= {k for k, _ in subsection_param_entries(sub_id, level)}
+    return keys
+
+
 def equations_panel(level, dd, p):
     """Equations + merged calibration, one collapsible subsection at a time. Left [2/3] = glosses +
     st.latex (with new/changed tags); right [1/3] = calibration cards for that subsection's params
@@ -109,13 +182,15 @@ def equations_panel(level, dd, p):
                    "$\\theta$ and $S_0$. Capability $x = a + c$, OOM above the "
                    "2026 frontier.")
     # CONCISE by default (Pavel's ruling): only the subsection changed at this level shows;
-    # one checkbox expands to the full model. The old Expanded/Collapsed/Concise mode tabs
-    # are gone — drop their stale session key so nothing rebinds to it.
+    # one checkbox expands to the full model. At L1 EVERYTHING is new, so all subsections
+    # show and the checkbox is hidden (D-048). The old display-mode tabs' stale session key
+    # is dropped so nothing rebinds to it.
     st.session_state.pop("eq_view", None)
-    show_all = st.checkbox("show all equations", key=_reg("w_eq_all", False),
-                           help="Unticked: only the subsection that is **new or changed at "
-                                "this level** is shown. Ticked: every subsection of the model "
-                                "so far, expanded.")
+    if level >= 2:
+        st.checkbox("show all equations", key=_reg("w_eq_all", False),
+                    help="Unticked: only the subsection that is **new or changed at this "
+                         "level** is shown (and the left panel narrows to its parameters). "
+                         "Ticked: every subsection of the model so far, expanded.")
 
     def eq(gloss, latex, tag=None):
         if tag == "new":
@@ -139,10 +214,7 @@ def equations_panel(level, dd, p):
                        "of the levels below) toward a long-run floor $g_{c\\infty}$.",
                        r"\dot c^L = g_c(t) = g_{c\infty} + (g_{c0}-g_{c\infty})e^{-\xi t}",
                        tag="changed" if level == 4 else None)
-            cards = [("g_C0", False)]
-            if level >= 4:
-                cards += [("g_C_inf", False), ("xi", False)]
-            _cal_cards(right, cards, dd, p)
+            _cal_cards(right, subsection_param_entries("leader_compute", level), dd, p)
         elif sub_id == "leader_algo":
             with left:
                 if level <= 2:
@@ -174,12 +246,7 @@ def equations_panel(level, dd, p):
                        "it is no longer a small correction).",
                        r"\psi\text{-share} = 1 - \dot a^L\big|_{\psi\ \text{frozen}} \big/ \dot a^L",
                        tag="new" if level == 3 else None)
-            cards = [("g_a", level < 3)]
-            if level >= 3:
-                cards += [("rho0", False), ("gamma", False)]
-            if level >= 9:
-                cards += [("alpha", False), ("eta", False)]
-            _cal_cards(right, cards, dd, p)
+            _cal_cards(right, subsection_param_entries("leader_algo", level), dd, p)
         elif sub_id == "follower":
             with left:
                 if level <= 5:
@@ -205,9 +272,7 @@ def equations_panel(level, dd, p):
             if level <= 5:
                 _cal_delta_merged(right, dd, p)
             else:
-                _cal_cards(right, [("delta_dev", False), ("delta_rel", False), ("Delta0", False),
-                                   ("split", False), ("g_a_F", False), ("g_CF0", False),
-                                   ("g_CF_inf", False), ("xi_F", False)], dd, p)
+                _cal_cards(right, subsection_param_entries("follower", level), dd, p)
         elif sub_id == "value":
             with left:
                 if level <= 4:
@@ -219,11 +284,7 @@ def equations_panel(level, dd, p):
                        "anchored so $W(0) = W_0$.",
                        r"W(x) = \frac{W_{\max}}{1 + 10^{-\nu (x - x_{mid})}}, \qquad W(0) = W_0",
                        tag="changed" if level == 5 else None)
-            cards = [("nu", False)]
-            if level >= 5:
-                cards.append(("x_mid", False))
-            cards.append(("W0", level < 9))
-            _cal_cards(right, cards, dd, p)
+            _cal_cards(right, subsection_param_entries("value", level), dd, p)
         elif sub_id == "revenue":
             with left:
                 if level >= 7:
@@ -238,10 +299,7 @@ def equations_panel(level, dd, p):
                    f"{_on}.",
                    rf"\text{{revenue}} = \theta\,\big[\,W({served}) - W(x^F)\,\big]",
                    tag="changed" if level == 7 else None)
-            cards = [("theta", False)]
-            if level >= 7:
-                cards.append(("tau", False))
-            _cal_cards(right, cards, dd, p)
+            _cal_cards(right, subsection_param_entries("revenue", level), dd, p)
         elif sub_id == "cost":
             with left:
                 if level >= 8:
@@ -263,14 +321,7 @@ def equations_panel(level, dd, p):
                        "now** ($\\ell = 0$), at prices falling at $g_p$ — so cost today is exactly "
                        "$S_0$ and net cost growth ≈ 2.4×/yr at the constant-compute defaults.",
                        r"\text{cost}(t) = S_0\,10^{\,c^L(t) - c^L(0)}\,10^{-g_p t}")
-            cards = []
-            if level >= 8:
-                cards.append(("phi_RD", False))
-            cards.append(("S0", False))
-            if level >= 2:
-                cards.append(("ell", False))
-            cards.append(("g_p", level < 8))
-            _cal_cards(right, cards, dd, p)
+            _cal_cards(right, subsection_param_entries("cost", level), dd, p)
             if level == 1:
                 right.markdown("$\\ell$ **=** 0 · *(pinned — training in advance arrives at "
                                "Level 2)*")
@@ -311,14 +362,28 @@ def equations_panel(level, dd, p):
 
     changed_here = _CHANGED_AT.get(level)
     existing = [s for s in _SUB_ORDER if not (s == "extensions" and level < 9)]
-    concise = not show_all
-    if concise and changed_here is not None:
-        st.caption(f"**{len(existing) - 1} unchanged subsections hidden** — they carry over from "
-                   "the levels below (tick **show all equations** for the full model).")
-    for sub_id in existing:
-        is_ch = (sub_id == changed_here)
-        if concise and changed_here is not None and not is_ch:
-            continue
-        label = _SUB_LABEL[sub_id] + ("   ·   ● changed at this level" if is_ch else "")
-        with st.expander(label, expanded=True):
-            render(sub_id)
+    shown = visible_subsections(level)
+    if len(shown) < len(existing):
+        st.caption(f"**{len(existing) - len(shown)} unchanged subsections hidden** — they "
+                   "carry over from the levels below (tick **show all equations** for the "
+                   "full model).")
+    # D-048: the changed subsection is marked VISUALLY (accent left border + subtle header
+    # tint, both themes) instead of the old "· ● changed at this level" label text
+    if changed_here in shown:
+        st.markdown(
+            f"<style>.st-key-eqsub_{changed_here} [data-testid='stExpander'] summary "
+            "{ border-left: 3px solid #4c8dff; background: rgba(76,141,255,0.10); }"
+            "</style>", unsafe_allow_html=True)
+    for sub_id in shown:
+        with st.container(key=f"eqsub_{sub_id}"):
+            with st.expander(_SUB_LABEL[sub_id], expanded=True):
+                # click-to-highlight (D-048): the ⌖ in the subsection's header area lights up
+                # this subsection's parameters in the left panel; clicking again clears
+                if subsection_param_entries(sub_id, level):
+                    on = st.session_state.get("_eq_hl") == sub_id
+                    with st.container(key=f"eqhl_{sub_id}"):
+                        st.button("⌖ ✓" if on else "⌖", key=f"hl_{sub_id}",
+                                  on_click=toggle_eq_hl, args=(sub_id,),
+                                  help="highlight this subsection's parameters in the left "
+                                       "panel" + ("; click again to clear" if on else ""))
+                render(sub_id)
