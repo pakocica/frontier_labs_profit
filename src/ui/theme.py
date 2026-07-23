@@ -571,17 +571,23 @@ def _layout_css(light):
           /* ---- D-051 page heading (spans the middle pane, above the sticky top strip) ---- */
           [data-testid="stLayoutWrapper"]:has(> .st-key-apptitle)
             { width: calc(100% - (var(--charts-w) - __GUTTER__)) !important; }
-          /* (D-053) the title reads as a BAR: centered, panel-grey like the side panels */
-          .st-key-apptitle { padding: 0.45rem 1rem 0.55rem; text-align: center;
+          /* (D-053) the title reads as a BAR: centered, panel-grey like the side panels.
+             Streamlit's markdown/element wrappers carry stray margins (-18px bottom on 1.57's
+             markdown, same class of bug as the footer) that cropped the subtitle out of the
+             bar — neutralize ALL inner margins so the title+subtitle sit as one centered
+             block with balanced padding on 1.59 (local) and 1.57 (stlite) alike. */
+          .st-key-apptitle { padding: 0.6rem 1rem 0.7rem; text-align: center;
             background: __PANEL_BG__; border-radius: 10px;
             border: 1px solid rgba(128,128,128,0.15); }
+          .st-key-apptitle div { margin: 0 !important; }
           /* the prose max-width cap (base CSS) would pin the title/footer text left — lift it */
           .st-key-apptitle [data-testid="stMarkdownContainer"],
           .st-key-appfooter [data-testid="stMarkdownContainer"]
             { max-width: none !important; width: 100%; text-align: center; }
           .st-key-apptitle .apptitle-main { font-weight: 700; font-size: 1.85rem;
             line-height: 1.12; letter-spacing: -0.01em; }
-          .st-key-apptitle .apptitle-sub { font-size: 0.98rem; opacity: 0.6; margin-top: 0.15rem; }
+          /* padding, not margin — the margin-neutralizer above would eat a margin-top */
+          .st-key-apptitle .apptitle-sub { font-size: 0.98rem; opacity: 0.6; padding-top: 0.15rem; }
 
           /* ---- D-051/D-053 author footer: quiet, FULL page width (spans over both side
              panels — z-index above the fixed charts column and the native sidebar) ---- */
@@ -594,6 +600,7 @@ def _layout_css(light):
              fixed bar to ~12px and pushes the text below the viewport — neutralize inside */
           .st-key-appfooter div { margin: 0 !important; }
           .st-key-appfooter .appfooter-inner { font-size: 0.72rem; opacity: 0.55; }
+          .st-key-appfooter .appfooter-sep { margin: 0 0.55rem; }
           .st-key-appfooter a { color: inherit; text-decoration: underline; }
           .st-key-appfooter a:hover { color: #4c8dff; opacity: 1; }
           /* the middle tabbed pane = the flexible remainder */

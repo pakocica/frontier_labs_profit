@@ -25,7 +25,8 @@ LEVEL_EXPLAINER = (
 # author footer (ships with the widget → also appears on the web version at the next sync)
 FOOTER_HTML = (
     'Built by <a href="https://pkocourek.com" target="_blank" rel="noopener">Pavel Kocourek</a>'
-    ' &middot; work in progress &middot; developed under the '
+    '<span class="appfooter-sep">&middot;</span>work in progress'
+    '<span class="appfooter-sep">&middot;</span>developed under the '
     '<a href="https://safe.ai" target="_blank" rel="noopener">CAIS Fellowship</a>'
 )
 
