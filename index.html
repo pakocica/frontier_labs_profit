@@ -3,26 +3,6 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <script>
-    /* (D-057) Phone routing: send small-screen visitors to the static introduction
-       (mobile.html) BEFORE the ~30-60s Pyodide download begins — the full explorer is
-       built for a laptop. The intro's "open the full explorer" link returns here with
-       ?full=1, which we remember for the session so it doesn't bounce back. Runs first
-       in <head> so the redirect happens before any heavy asset loads. */
-    (function () {
-      try {
-        var qp = new URLSearchParams(location.search);
-        if (qp.get("full") === "1") { try { sessionStorage.setItem("flp_full", "1"); } catch (e) {} }
-        var full = qp.get("full") === "1" ||
-          (function () { try { return sessionStorage.getItem("flp_full") === "1"; } catch (e) { return false; } })();
-        /* a real phone: small in its shorter dimension AND a coarse (touch) pointer, so a
-           desktop browser in a short/narrow window keeps the full app. */
-        var coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
-        var phone = coarse && Math.min(window.innerWidth, window.innerHeight) < 620;
-        if (phone && !full) { location.replace("./mobile.html"); }
-      } catch (e) {}
-    })();
-  </script>
   <title>Frontier-AI-lab competition — interactive explorer</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/browser@1.8.1/build/stlite.css" />
   <link rel="stylesheet" href="./intro.css?v=3" />
