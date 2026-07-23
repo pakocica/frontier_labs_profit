@@ -554,9 +554,15 @@ def _layout_css(light):
              wrapper is width:100%, so a margin would overflow instead of shrinking it) */
           [data-testid="stLayoutWrapper"]:has(> .st-key-topbar)
             { width: calc(100% - (var(--charts-w) - __GUTTER__)) !important; }
-          /* top strip: level selector left, mode switch flush right */
-          .st-key-topbar [data-testid="stSegmentedControl"]
-            { display: flex; justify-content: flex-end; }
+          /* top strip: level selector left, mode switch flush right. The segmented control's
+             element container is SHRINK-WRAPPED and left-aligned inside its column; its real
+             testid is stButtonGroup (both 1.57 and 1.59) — push it right with an auto margin.
+             (The old stSegmentedControl selector never matched — why the switch sat left.) */
+          .st-key-topbar [data-testid="stElementContainer"]:has([data-testid="stButtonGroup"])
+            { margin-left: auto; }
+          .st-key-topbar [data-testid="stButtonGroup"] { margin-left: auto; }
+          /* the level picker only needs to fit "N · <name>" — don't let it eat the row */
+          .st-key-topbar [data-testid="stSelectbox"] { max-width: 13rem; }
           /* the "Model:" label sits flush against the level selector, vertically centred */
           .st-key-topbar .model-label { text-align: right; font-weight: 600; opacity: 0.8;
             white-space: nowrap; font-size: 0.95rem; }

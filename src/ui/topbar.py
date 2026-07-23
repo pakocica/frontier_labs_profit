@@ -45,7 +45,9 @@ def render_title():
 def render():
     """The sticky top strip: [Model: · level selector · ⓘ] at the left, mode switch flush right."""
     with st.container(key="topbar"):
-        c_lab, c_sel, c_info, c_mode = st.columns([0.5, 1.9, 0.35, 1.7],
+        # ratios: label+picker+ⓘ hug the LEFT edge (picker width-capped in theme CSS), the
+        # wide last column pushes the mode switch to the RIGHT edge (flex-end there)
+        c_lab, c_sel, c_info, c_mode = st.columns([0.42, 1.15, 0.22, 2.6],
                                                    vertical_alignment="center")
         c_lab.markdown("<div class='model-label'>Model:</div>", unsafe_allow_html=True)
         # the level selector writes st.session_state["level"]; the sidebar reads it (top of run).
