@@ -225,7 +225,26 @@ _D050_JS = r"""
     if (!col) return;
     var cw = col.getBoundingClientRect().width - 24;   /* minus the panel's horizontal padding */
     if (cw <= 0) return;                                /* hidden (narrow, overlay closed) → skip */
-    var fill = (w.innerHeight - CHART_CHROME) / 2;      /* two charts share the vertical budget */
+    /* (D-054, revised) the per-chart vertical budget = space from the FIRST chart's top down to
+       the viewport bottom, minus the inter-chart gaps and the column's bottom padding (footer
+       clearance), split across n charts. Every term is measured from element POSITIONS, not from
+       chart heights — the first chart's top is fixed by the chrome above it (tab strip, header,
+       any expanders), the gap is the flex row-gap, the bottom padding is a CSS constant — so the
+       budget is INDEPENDENT of --chart-h and cannot feed back / thrash (the old scrollHeight −
+       chartsH measure was polluted whenever a plot's SVG overflowed its clamped container). */
+    var charts = col.querySelectorAll('[data-testid="stPlotlyChart"]');
+    var n = Math.max(1, charts.length);
+    var fill;
+    if (charts.length) {
+      var first = charts[0].getBoundingClientRect();
+      var gap = 0;
+      if (charts.length > 1)                            /* flex row-gap, invariant to chart height */
+        gap = Math.max(0, charts[1].getBoundingClientRect().top - charts[0].getBoundingClientRect().bottom);
+      var padB = parseFloat(w.getComputedStyle(col).paddingBottom) || 0;
+      fill = (w.innerHeight - first.top - (n - 1) * gap - padB - 6) / n;   /* −6 safety */
+    } else {
+      fill = (w.innerHeight - Math.max(0, col.getBoundingClientRect().top) - CHART_CHROME) / n;
+    }
     var h = Math.round(Math.max(CHART_MIN, Math.min(Math.min(cw * CHART_ASPECT, fill), CHART_MAX)));
     if (R.style.getPropertyValue('--chart-h') !== h + 'px') {
       R.style.setProperty('--chart-h', h + 'px');
@@ -233,8 +252,31 @@ _D050_JS = r"""
                                                            container height needs a frame to apply
                                                            before the plot settles to it) */
     }
+    /* (D-054) while the Graphs OVERLAY is showing, always re-fit explicitly: the CSS-only
+       show/hide fires no resize Plotly notices, and a chart-group switch or MC re-render
+       remounts plots at the stale narrow width. Debounced by sizeChartsSoon upstream. */
+    if (R.getAttribute('data-graphs-open') === '1') plotlyFitSoon();
   }
   function sizeChartsSoon() { if (_szT) w.clearTimeout(_szT); _szT = w.setTimeout(sizeCharts, 90); }
+
+  /* (D-054) explicit per-chart Plotly re-fit. The Graphs overlay opens via a pure CSS attribute
+     toggle — no Streamlit re-render and (on some builds) no effective resize reaches Plotly, so
+     the chart stayed at its pre-overlay ~285px width. A direct Plotly.Plots.resize on every
+     visible chart in the (overlay) column is authoritative; guarded — window.Plotly is a global
+     under stlite 1.57 but may be absent locally, where the poke() resize event still covers it. */
+  function plotlyFit() {
+    try {
+      var P = w.Plotly;
+      if (!P || !P.Plots || !P.Plots.resize) return;
+      d.querySelectorAll('.st-key-chartscol .js-plotly-plot').forEach(function (el) {
+        if (el.offsetWidth > 0) { try { P.Plots.resize(el); } catch (e) {} }
+      });
+    } catch (e) {}
+  }
+  function plotlyFitSoon() {   /* after layout settles: next frame + a settle-delay pass */
+    w.requestAnimationFrame(plotlyFit);
+    w.setTimeout(plotlyFit, 320);
+  }
 
   /* (D-051) responsive MODE — a client-only decision (viewport width) published as data-app-mode
      on <html>; all mode CSS branches off it. In narrow/phone the fixed charts column can't sit
@@ -285,7 +327,7 @@ _D050_JS = r"""
       /* poke twice: charts that first laid out while the column was display:none need a
          resize to paint, and a second delayed poke covers the show transition */
       on(b, 'click', function () { graphsOpen = true; applyMode(); poke();
-        w.setTimeout(poke, 260); });
+        w.setTimeout(poke, 260); plotlyFitSoon(); });   /* (D-054) snap charts to overlay width */
       real.parentElement.appendChild(b);
     }
     var col = d.querySelector('.st-key-chartscol');
@@ -554,15 +596,29 @@ def _layout_css(light):
              wrapper is width:100%, so a margin would overflow instead of shrinking it) */
           [data-testid="stLayoutWrapper"]:has(> .st-key-topbar)
             { width: calc(100% - (var(--charts-w) - __GUTTER__)) !important; }
-          /* top strip: level selector left, mode switch flush right. The segmented control's
-             element container is SHRINK-WRAPPED and left-aligned inside its column; its real
-             testid is stButtonGroup (both 1.57 and 1.59) — push it right with an auto margin.
-             (The old stSegmentedControl selector never matched — why the switch sat left.) */
+          /* top strip anchoring: Streamlit columns are PROPORTIONAL, so on a very wide panel
+             fractional ratios leave slack and the left group drifts inward. Override the flex
+             basis per column instead: label + ⓘ columns shrink to CONTENT width, the picker
+             column is a fixed 11.5rem, and the mode-switch column absorbs ALL remaining width —
+             so "Model:" pins to the true left edge and the switch to the true right edge at any
+             panel width. (The switch's container is shrink-wrapped under testid stButtonGroup —
+             not stSegmentedControl — hence the auto margin; same DOM on 1.57 and 1.59.) */
+          .st-key-topbar [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
+          /* …except on phone, where the row may be narrower than the two groups combined */
+          html[data-app-mode="phone"] .st-key-topbar [data-testid="stHorizontalBlock"]
+            { flex-wrap: wrap !important; }
+          .st-key-topbar [data-testid="stColumn"] { min-width: 0 !important; }
+          .st-key-topbar [data-testid="stColumn"]:has(.model-label)
+            { flex: 0 0 auto !important; width: auto !important; }
+          .st-key-topbar [data-testid="stColumn"]:has([data-testid="stSelectbox"])
+            { flex: 0 0 11.5rem !important; width: 11.5rem !important; }
+          .st-key-topbar [data-testid="stColumn"]:has(.st-key-levelinfo)
+            { flex: 0 0 auto !important; width: auto !important; }
+          .st-key-topbar [data-testid="stColumn"]:has([data-testid="stButtonGroup"])
+            { flex: 1 1 0 !important; }
           .st-key-topbar [data-testid="stElementContainer"]:has([data-testid="stButtonGroup"])
             { margin-left: auto; }
           .st-key-topbar [data-testid="stButtonGroup"] { margin-left: auto; }
-          /* the level picker only needs to fit "N · <name>" — don't let it eat the row */
-          .st-key-topbar [data-testid="stSelectbox"] { max-width: 13rem; }
           /* the "Model:" label sits flush against the level selector, vertically centred */
           .st-key-topbar .model-label { text-align: right; font-weight: 600; opacity: 0.8;
             white-space: nowrap; font-size: 0.95rem; }
@@ -744,8 +800,21 @@ def _layout_css(light):
              the vertical fill); the responsive (autosize, height="stretch") plotly charts fill a
              container pinned to it, so the two stacked charts occupy most of the panel and re-fit
              to the panel width. CSS-driven (not per-chart relayout) → survives the background
-             MC-accumulation reruns. */
-          :root { --chart-h: 300px; }
+             MC-accumulation reruns.
+             (D-054) A plotly chart's height is pinned to whatever --chart-h reads when Streamlit
+             RENDERS the chart element; Streamlit then REVERTS any later client change (a pure CSS
+             --chart-h change or a Plotly.relayout never re-fits an already-mounted plot — verified
+             on BOTH local 1.59 and deployed stlite 1.57). So the mounted plots are effectively
+             this default value, uniform across tabs. Make it a viewport-fitted clamp (not a flat
+             300px) so a two-chart stack fits a short laptop on load, and size the chrome term to
+             the LARGEST-chrome 2-chart tab (Model path, which keeps its how-to-read expander:
+             measured ≈15.7rem of chrome, stable across the 14–18px fluid-font range) so NO 2-chart
+             tab overflows. The chrome is in rem so it tracks the fluid font. 15rem sits a hair
+             under 15.7 — within the column's ~15px footer-clearance buffer for Model path, while
+             letting the lower-chrome Finance charts fill more of the panel. The shim then refines
+             the CONTAINER via --chart-h (correct per tab & width); the plot re-fits to it on the
+             next rerun (any interaction). */
+          :root { --chart-h: clamp(150px, calc((100vh - 15rem) / 2), 560px); }
           .st-key-chartscol [data-testid="stPlotlyChart"] { height: var(--chart-h) !important; }
 
           /* ================= D-051 responsive modes (data-app-mode = wide|narrow|phone) =========
@@ -765,6 +834,12 @@ def _layout_css(light):
           html[data-app-mode="narrow"][data-graphs-open="1"] #graphsClose,
           html[data-app-mode="phone"][data-graphs-open="1"]  #graphsClose { display: block; }
           #graphsClose:hover { color: #4c8dff; }
+          /* (D-054) overlay charts: stlite 1.57 charts re-fit to the full overlay width via the
+             shim's Plotly.Plots.resize; a build whose chart width is server-computed (1.59 dev)
+             ignores that, so any narrower-than-overlay plot at least sits CENTERED, not pinned
+             left in empty panel background. */
+          html[data-graphs-open="1"] .st-key-chartscol .js-plotly-plot .svg-container
+            { margin-left: auto !important; margin-right: auto !important; }
 
           /* narrow/phone: suppress the wide charts drag controls; the middle, its spacer column
              and the top strip take the full width (the fixed column is out of flow) */

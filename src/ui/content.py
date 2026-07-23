@@ -173,31 +173,29 @@ LEVEL_CARDS = {
         "A **leader** pushes the capability frontier $x^L$ at a constant speed; a **follower** "
         "trails at $x^F$ and catches up at rate $\\delta$. The leader earns the **rent on its "
         "lead** — margin $\\theta$ times the extra value it can offer over the follower — and "
-        "**pays for the compute of the model it is running right now** ($\\ell = 0$).",
+        "**pays for the compute of the model it is running right now**.",
         "\\text{revenue} = \\theta\\,[\\,W(x^L) - W(x^F)\\,], \\qquad "
         "\\dot\\Delta = \\dot x^L - \\delta\\,\\Delta",
-        "This is the complete base model — five controls (compute scaling ⇒ $g_c$, follower lag "
-        "⇒ $\\delta$, value multiplier ⇒ $\\nu$, $\\theta$, $S_0$), nothing hidden. The follower "
-        "has **no engine of its own** — pure catch-up, "
-        "$\\dot x^F = \\delta\\,(x^L - x^F)$ — so $\\delta$ must supply the leader's *full* speed. "
-        "With compute growth constant the gap **holds exactly at $\\Delta_0$**: "
-        "$\\delta = (g_c+g_a)/\\Delta_0 \\approx$ ⟪DELTA⟫/yr. Paying only for the **current** "
-        "model, "
-        "cost today is just $S_0$ and roughly matches the rent it earns — **per-model profit is "
-        "about break-even** (the Anthropic pattern). Each next level *adds* one mechanism: paying "
-        "ahead for the next model (2), where growth comes from (3), the compute slowdown (4), "
-        "value saturation (5), and the anatomy of catch-up (6)."),
+        "This is the complete base model — five controls, nothing hidden: compute scaling ⇒ "
+        "$g_c$, follower lag ⇒ $\\delta$, value per OOM ⇒ $\\nu$ (each extra order of magnitude "
+        "of capability translates into $\\nu$ orders of magnitude of value), plus the margin "
+        "$\\theta$ and today's training bill $S_0$. The follower has **no engine of its own** — "
+        "pure catch-up — so the observed lag pins $\\delta \\approx$ ⟪DELTA⟫/yr and the gap "
+        "**holds steady at $\\Delta_0$**. Paying only for the **current** model, cost roughly "
+        "matches the rent — **per-model profit is about break-even** (the Anthropic pattern). "
+        "Each next level *adds* one mechanism: paying ahead for the next model (2), where growth "
+        "comes from (3), the compute slowdown (4), value saturation (5), and the anatomy of "
+        "catch-up (6)."),
     2: ("Training in advance",
         "**Adds the training lead time $\\ell$.** A frontier model isn't free when it ships — its "
         "compute is **bought $\\ell$ years in advance**. So today's bill is for the *next*, bigger "
         "model: it jumps by $10^{\\,g_c\\ell}$ (≈ **⟪JUMP⟫×** at $\\ell = $ ⟪ELL⟫).",
         "\\text{cost}(t) = S_0\\,10^{\\,c^L(t+\\ell)}\\,10^{-g_p t}",
-        "This is the teaching contrast: the model *running* is still ~break-even (Level 1), but "
-        "once you also fund the next one, the **flow profit turns negative today** — a loss on "
-        "current operations even though each individual model pays for itself. Roughly the reported "
-        "**Anthropic-vs-OpenAI** contrast (profit per model vs loss while scaling), depending on "
-        "calibration. $\\ell$ has no effect on the *shape* of the path while compute growth is "
-        "constant — it starts to bite once the slowdown (Level 4) bends the compute curve."),
+        "Funding the *next* model while the current one only breaks even turns **today's flow "
+        "profit negative** — the reported **Anthropic-vs-OpenAI** contrast (profit per model vs "
+        "loss while scaling), depending on calibration. While compute growth is constant $\\ell$ "
+        "doesn't change the *shape* of the path; it starts to bite once the slowdown (Level 4) "
+        "bends the compute curve."),
     3: ("Where growth comes from",
         "**Adds the growth engine.** The base model's constant algorithmic rate $g_a$ becomes a "
         "*produced* quantity — driven by research inputs, and crucially by AI speeding up its "

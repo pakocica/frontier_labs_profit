@@ -102,17 +102,10 @@ def _finance_tile(d, sim, hl, LEVEL, mode_mc, mc_key):
             mc_headline(mc_key, show_blowup=(LEVEL >= 3))
             need_rerun = mc_panel_fin(mc_key, visible=True, show_blowup=(LEVEL >= 3))
         else:
-            # D-047 declutter: no verdict cards, no sanity line — the graphs carry it; the
-            # how-to-read prose folds away so the narrow panel leads with the charts
-            with st.expander("how to read", expanded=False):
-                tab_intro(
-                    "The leader's money over the horizon: profit flow (revenue minus cost "
-                    "each year) and the revenue and cost lines behind it.",
-                    "Revenue = $\\theta \\cdot$ [value of the leader's model − value the "
-                    "follower already offers] — the **gap rent**. Profit above the axis's "
-                    "zero line means it is making money that year. (Flows are undiscounted "
-                    "— no NPV.)")
-            f = fig_base("Profit flow  Π  ($B/yr)", "year", "$/yr  ($B)", height=230)
+            # D-047/D-054 declutter: no verdict cards, no sanity line, no how-to-read expander —
+            # the graphs carry it; the profit title now names the leader so first-time viewers
+            # know whose profit it is without the removed explainer.
+            f = fig_base("Leader profit  Π  ($B/yr)", "year", "$/yr  ($B)", height=230)
             line(f, sim["t"], sim["profit"], "profit  Π", C_PROFIT)
             # no plotted break-even line — the axis zeroline marks 0; keep 0 inside the y-range
             if float(np.min(sim["profit"])) >= 0.0 or float(np.max(sim["profit"])) <= 0.0:
