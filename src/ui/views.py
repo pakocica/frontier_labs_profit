@@ -95,9 +95,10 @@ def _finance_tile(d, sim, hl, LEVEL, mode_mc, mc_key):
     """Finance FIRST (D-043 — it is the final output). Point trajectory or MC fan per mode.
     Returns True when the MC corner reported an inspection change (caller reruns)."""
     need_rerun = False
-    with st.container(border=True):
+    with st.container(border=False):
         # D-054 (round 2): no section header (the group switch names it) and no how-to-read —
-        # each chart title is self-explanatory instead.
+        # each chart title is self-explanatory instead. D-056: border=False — the fixed panel
+        # already frames the graphs; the bordered card was a redundant box (and inset padding).
         if mode_mc:
             mc_headline(mc_key, show_blowup=(LEVEL >= 3))
             need_rerun = mc_panel_fin(mc_key, visible=True, show_blowup=(LEVEL >= 3))
@@ -122,9 +123,9 @@ def _model_tile(d, sim, LEVEL, mode_mc, mc_key):
     point paths, or the capability-gap fan in Monte-Carlo mode."""
     served = d["tau"] > 0.0                 # x^R differs from x^L only under a release delay
     show_growth = LEVEL >= 3
-    with st.container(border=True):
+    with st.container(border=False):
         # D-054 (round 2): no section header (the group switch names it) and no how-to-read —
-        # each chart title is self-explanatory instead.
+        # each chart title is self-explanatory instead. D-056: border=False (see _finance_tile).
         if mode_mc:
             mc_panel_path(mc_key)
             st.caption("The gap $\\Delta$ is what the leader earns rent on — its forecast fan "

@@ -225,23 +225,27 @@ _D050_JS = r"""
     if (!col) return;
     var cw = col.getBoundingClientRect().width - 24;   /* minus the panel's horizontal padding */
     if (cw <= 0) return;                                /* hidden (narrow, overlay closed) → skip */
-    /* (D-054, revised) the per-chart vertical budget = space from the FIRST chart's top down to
-       the viewport bottom, minus the inter-chart gaps and the column's bottom padding (footer
+    /* (D-054, revised) the per-chart vertical budget = the column's VISIBLE height minus the
+       chrome above the first chart, the inter-chart gaps and the bottom padding (footer
        clearance), split across n charts. Every term is measured from element POSITIONS, not from
-       chart heights — the first chart's top is fixed by the chrome above it (tab strip, header,
-       any expanders), the gap is the flex row-gap, the bottom padding is a CSS constant — so the
-       budget is INDEPENDENT of --chart-h and cannot feed back / thrash (the old scrollHeight −
-       chartsH measure was polluted whenever a plot's SVG overflowed its clamped container). */
+       chart heights, so the budget is INDEPENDENT of --chart-h and cannot feed back / thrash.
+       (D-056) The chrome above the first chart is measured as its offset within the column's
+       scrollable CONTENT (rect-top − column-top + scrollTop), NOT its raw viewport top — the
+       panel scrolls internally (overflow-y:auto), and using the viewport top made the fitted
+       height GROW as you scrolled down (first.top shrank). This form is scroll-invariant. */
     var charts = col.querySelectorAll('[data-testid="stPlotlyChart"]');
     var n = Math.max(1, charts.length);
     var fill;
     if (charts.length) {
+      var colRect = col.getBoundingClientRect();
       var first = charts[0].getBoundingClientRect();
       var gap = 0;
       if (charts.length > 1)                            /* flex row-gap, invariant to chart height */
         gap = Math.max(0, charts[1].getBoundingClientRect().top - charts[0].getBoundingClientRect().bottom);
       var padB = parseFloat(w.getComputedStyle(col).paddingBottom) || 0;
-      fill = (w.innerHeight - first.top - (n - 1) * gap - padB - 6) / n;   /* −6 safety */
+      var chromeAbove = (first.top - colRect.top) + col.scrollTop;   /* scroll-invariant */
+      var colTopVP = Math.max(0, colRect.top);          /* 0 wide, ~6.5rem in the overlay */
+      fill = (w.innerHeight - colTopVP - chromeAbove - (n - 1) * gap - padB - 6) / n;   /* −6 safety */
     } else {
       fill = (w.innerHeight - Math.max(0, col.getBoundingClientRect().top) - CHART_CHROME) / n;
     }
@@ -851,15 +855,15 @@ def _layout_css(light):
              on BOTH local 1.59 and deployed stlite 1.57). So the mounted plots are effectively
              this default value, uniform across tabs. Make it a viewport-fitted clamp (not a flat
              300px) so a two-chart stack fits a short laptop on load, and size the chrome term to
-             the LARGEST-chrome 2-chart group so NO 2-chart group overflows. After the D-054 round-2
-             declutter (section headers + the how-to-read expander removed) BOTH groups (Graphs and
-             Capability) have ≈9.7rem of chrome (measured at the 14px font floor of wide mode; a
-             touch less at 18px since the fixed tab-strip px shrink in rem terms), so a single
-             constant fits both AND the group-switch carry-over can't overflow (equal budgets).
-             10.5rem sits just above 9.7 with a small cushion. The chrome is in rem so it tracks the
-             fluid font. The shim then refines the CONTAINER via --chart-h (correct per group &
-             width); the plot re-fits to it on the next rerun (any interaction). */
-          :root { --chart-h: clamp(150px, calc((100vh - 10.5rem) / 2), 560px); }
+             the LARGEST-chrome 2-chart group so NO 2-chart group overflows. After the D-054/D-056
+             declutter (section headers, the how-to-read expander AND the bordered card removed)
+             BOTH groups (Graphs and Capability) have ≈8.7rem of chrome (measured at the 14px font
+             floor of wide mode; a touch less at 18px since the fixed tab-strip px shrink in rem
+             terms), so a single constant fits both AND the group-switch carry-over can't overflow
+             (equal budgets). 9.5rem sits just above 8.7 with a small cushion. The chrome is in rem
+             so it tracks the fluid font. The shim then refines the CONTAINER via --chart-h (correct
+             per group & width, and scroll-invariant); the plot re-fits on the next rerun. */
+          :root { --chart-h: clamp(150px, calc((100vh - 9.5rem) / 2), 560px); }
           .st-key-chartscol [data-testid="stPlotlyChart"] { height: var(--chart-h) !important; }
 
           /* ================= D-051 responsive modes (data-app-mode = wide|narrow|phone) =========
