@@ -6,7 +6,7 @@ view marks it with a subtle border/tint on the expander header instead.
 import streamlit as st
 
 from .calibration import _cal_cards, _cal_delta_merged
-from .state import _gc_sym, _reg, toggle_eq_hl
+from .state import _gc_sym, _reg
 
 
 def _eqcols():
@@ -360,16 +360,24 @@ def equations_panel(level, dd, p):
             f"<style>.st-key-eqsub_{changed_here} [data-testid='stExpander'] summary "
             "{ border-left: 3px solid #4c8dff; background: rgba(76,141,255,0.10); }"
             "</style>", unsafe_allow_html=True)
+    from .calpanel import param_row_key
     for sub_id in shown:
         with st.container(key=f"eqsub_{sub_id}"):
             with st.expander(_SUB_LABEL[sub_id], expanded=True):
-                # click-to-highlight (D-048): the ⌖ in the subsection's header area lights up
-                # this subsection's parameters in the left panel; clicking again clears
-                if subsection_param_entries(sub_id, level):
-                    on = st.session_state.get("_eq_hl") == sub_id
-                    with st.container(key=f"eqhl_{sub_id}"):
-                        st.button("⌖ ✓" if on else "⌖", key=f"hl_{sub_id}",
-                                  on_click=toggle_eq_hl, args=(sub_id,),
-                                  help="highlight this subsection's parameters in the left "
-                                       "panel" + ("; click again to clear" if on else ""))
+                # (D-055) hover-to-highlight: hovering this subsection lights up its parameters
+                # in the sidebar (desktop only; wired client-side in theme.inject_frontend_js).
+                # We emit the subsection → sidebar-row-key map as a hidden marker the shim reads,
+                # so the TRIGGER is hover, not a click control. The old ⌖ click button is gone —
+                # it was pointless when only one subsection shows, and hover reads cleaner.
+                _entries = subsection_param_entries(sub_id, level)
+                if _entries:
+                    _rows, _seen = [], set()
+                    for _k, _ in _entries:
+                        _rk = param_row_key(_k)
+                        if _rk not in _seen:
+                            _seen.add(_rk)
+                            _rows.append(_rk)
+                    st.markdown(
+                        f'<span class="eqhl-src" data-params="{" ".join(_rows)}"></span>',
+                        unsafe_allow_html=True)
                 render(sub_id)

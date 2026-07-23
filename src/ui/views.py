@@ -358,22 +358,9 @@ def render_main(d, items, sim, hl, p, LEVEL):
         with scol:
             _pane_strip()
     else:
-        # equations click-to-highlight (D-048): light up the ⌖-selected subsection's rows,
-        # scrolling the sidebar to the first of them once per selection change
-        hl = st.session_state.get("_eq_hl")
-        if hl:
-            from .equations import subsection_param_entries
-            keys = [k for k, _ in subsection_param_entries(hl, LEVEL)]
-            if keys:
-                rows = []
-                for k in keys:                      # de-duped, sidebar order = map order
-                    rk = calpanel.param_row_key(k)
-                    if rk not in rows:
-                        rows.append(rk)
-                theme.inject_cal_emphasis_css(rows)
-                if st.session_state.get("_eq_hl_scrolled") != hl:
-                    calpanel._autoscroll(rows[0])
-                    st.session_state["_eq_hl_scrolled"] = hl
+        # (D-055) the equations→parameters highlight is now HOVER-driven and fully client-side
+        # (desktop only; see theme.inject_frontend_js), so there is no per-run CSS injection or
+        # autoscroll here — and `hl` stays the headline dict the chart panel needs.
         lcol, ccol = st.columns([1.0, 0.5], gap="small")
         with lcol:
             _tabbed_pane(d, p, LEVEL)

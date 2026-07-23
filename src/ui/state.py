@@ -55,16 +55,6 @@ def close_cal():
 # panel column itself renders every run and the MC component stays mounted by construction)
 
 
-# ---- equations click-to-highlight (D-048) ---------------------------------------------------
-def toggle_eq_hl(sub_id):
-    """⌖ callback on an equations subsection: highlight its parameters in the left panel
-    (tint + dim others, the calibration-emphasis idiom); clicking the same subsection again
-    clears. The one-shot autoscroll re-arms on every change."""
-    S = st.session_state
-    S["_eq_hl"] = None if S.get("_eq_hl") == sub_id else sub_id
-    S.pop("_eq_hl_scrolled", None)
-
-
 # ---- reset infrastructure -----------------------------------------------------------------
 # Widgets are KEYED (key=f"w_{param}") and seeded into session_state when first created, instead of
 # passing value= — the seed-if-absent pattern lets a callback write the widget's state on reset

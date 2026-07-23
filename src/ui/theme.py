@@ -467,6 +467,47 @@ _D050_JS = r"""
     if (os) R.setAttribute('data-sb-hover', '1'); else R.removeAttribute('data-sb-hover');
   });
 
+  /* (D-055) equations→parameters HOVER highlight — desktop only, DELEGATED (one listener) so it
+     survives reruns and shim reinstalls with no per-node bookkeeping. Hovering an equations
+     subsection (.st-key-eqsub_*) reads its hidden .eqhl-src marker (the mapped sidebar row keys)
+     and tags those rows .eqhl-on + sets data-eqhover on <html>; leaving the subsection clears.
+     Skipped in phone mode and on non-hover (touch) pointers — hover doesn't exist there and the
+     sidebar is a drawer. Replaces the old ⌖ click control (D-048). */
+  function eqHoverCapable() {
+    if (R.getAttribute('data-app-mode') === 'phone') return false;
+    return !w.matchMedia || w.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  }
+  /* Emphasis is driven by a dynamic <style> in the (stable) <head> that targets the mapped rows
+     BY CLASS + a data-eqhover flag on <html> — nothing is written onto the volatile sidebar row
+     nodes, so it survives the background-MC reruns that re-render the sidebar (a JS-toggled class
+     on the row node would be dropped on the next rerun). */
+  function eqStyleEl() {
+    var s = d.getElementById('eqhlStyle');
+    if (!s) { s = d.createElement('style'); s.id = 'eqhlStyle'; d.head.appendChild(s); }
+    return s;
+  }
+  function eqSet(rows) {
+    var s = eqStyleEl();
+    if (!rows || !rows.length) { s.textContent = ''; R.removeAttribute('data-eqhover'); return; }
+    var sel = rows.map(function (rk) {
+      return 'html[data-eqhover="1"] section[data-testid="stSidebar"] .st-key-' + rk;
+    }).join(',');
+    s.textContent = sel + '{opacity:1 !important;background:rgba(76,141,255,0.10);' +
+                    'outline:2px solid rgba(76,141,255,0.40);}';
+    R.setAttribute('data-eqhover', '1');
+  }
+  function eqClear() { w.__eqHost = null; eqSet([]); }
+  on(d, 'mouseover', function (e) {
+    var t = e.target; if (!t || !t.closest) return;
+    var host = t.closest('[class*="st-key-eqsub_"]');
+    if (!host) { if (w.__eqHost) eqClear(); return; }
+    if (!eqHoverCapable() || host === w.__eqHost) return;
+    w.__eqHost = host;
+    var src = host.querySelector('.eqhl-src');
+    eqSet(src ? (src.getAttribute('data-params') || '').split(/\s+/).filter(Boolean) : []);
+  });
+  eqClear();   /* clear any stale highlight carried across a shim reinstall */
+
   /* ---- ONE observer for everything that must survive reruns ---- */
   lvlFix(); sbForceOpen(); ensureGraphs(); sizeChartsSoon();
   w.__d050RO = new MutationObserver(function () { lvlFix(); sbForceOpen(); ensureGraphs(); sizeChartsSoon(); });
@@ -764,13 +805,16 @@ def _layout_css(light):
             { border: none; background: transparent; padding: 0 2px; min-height: 1.2rem;
               line-height: 1.2; font-size: 0.85rem; opacity: 0.65; }
           [class*="st-key-ieq_"] button:hover { opacity: 1; color: #4c8dff; }
-          /* the ⌖ click-to-highlight glyph in each equations subsection (D-048) */
-          [class*="st-key-eqhl_"] { display: flex; justify-content: flex-end;
-            margin-top: -0.4rem; }
-          [class*="st-key-eqhl_"] button
-            { border: none; background: transparent; padding: 0 2px; min-height: 1.2rem;
-              line-height: 1.2; font-size: 0.95rem; opacity: 0.6; }
-          [class*="st-key-eqhl_"] button:hover { opacity: 1; color: #4c8dff; }
+          /* (D-055) equations→parameters HOVER highlight. The shim reads a hidden per-subsection
+             marker (.eqhl-src carries the mapped sidebar row keys) and, while the mouse is over a
+             subsection, sets data-eqhover on <html> and injects an #eqhlStyle rule that
+             re-emphasizes the mapped rows (opacity 1 + tint + outline). This DIM rule fades the
+             rest; both target rows BY CLASS (not a JS-toggled node class) so they survive the
+             background-MC reruns. Desktop only — the shim skips it in phone mode / on non-hover
+             pointers. Mirrors the click-era calibration-emphasis look. */
+          .eqhl-src { display: none; }
+          html[data-eqhover="1"] section[data-testid="stSidebar"] [class*="st-key-row_"]
+            { opacity: 0.4; }
 
           /* compact sidebar rows: tighter vertical rhythm + flush label lines */
           section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: 0.55rem; }
