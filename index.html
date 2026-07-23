@@ -5,8 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Frontier-AI-lab competition — interactive explorer</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/browser@1.8.1/build/stlite.css" />
-  <link rel="stylesheet" href="./intro.css?v=2" />
-  <style> html, body, #root { margin: 0; padding: 0; height: 100%; } </style>
+  <link rel="stylesheet" href="./intro.css?v=3" />
+  <style>
+    html, body, #root { margin: 0; padding: 0; height: 100%; }
+    /* critical inline fallback: the boot cover must paint IMMEDIATELY, even if intro.css
+       is still in flight (phone first loads saw a blank page otherwise) */
+    #intro { position: fixed; inset: 0; z-index: 1000000; background: #0e1117; color: #e6e6df;
+      display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+      overflow-y: auto; padding: 1rem;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    @media (prefers-color-scheme: light) { #intro { background: #ffffff; color: #31333f; } }
+  </style>
 </head>
 <body>
   <!-- Boot overlay: instant minimal cover; intro.js expands it into the loading intro
@@ -22,7 +31,7 @@
     </div>
   </div>
   <div id="root"></div>
-  <script src="./intro.js?v=2" defer></script>
+  <script src="./intro.js?v=3" defer></script>
   <script type="module">
     import { mount } from "https://cdn.jsdelivr.net/npm/@stlite/browser@1.8.1/build/stlite.js";
     import { APP_FILES } from "./app_files.js";

@@ -86,20 +86,51 @@
       ready = true;
       stage = "Ready.";
       console.log("boot-to-first-paint: " + ((performance.now() - t0) / 1000).toFixed(1) + "s");
-      if (state === "min") dismiss();   // grace window or post-skip: straight in
+      // grace window or post-skip: straight in — unless the phone is held in portrait,
+      // where the overlay stays up asking for landscape (it auto-dismisses on rotation)
+      if (state === "min" && !phonePortrait()) dismiss();
       render();
     }
   }, 300);
 
+  var gone = false;
   function dismiss() {
+    if (gone) return;
+    gone = true;
     intro.classList.add("i-gone");
     setTimeout(function () { intro.remove(); }, 700);
   }
 
+  /* ---------------- phone-portrait gate: the explorer needs landscape ----------------
+     A portrait PHONE (smaller viewport dimension < 620px, matching the app's own phone
+     breakpoint) keeps the intro up with a "rotate to landscape" banner; the moment the
+     device rotates to landscape (and the app is ready) the overlay closes by itself. */
+  function phonePortrait() {
+    return window.innerHeight > window.innerWidth &&
+           Math.min(window.innerWidth, window.innerHeight) < 620;
+  }
+  function syncRotate() {
+    if (gone) return;
+    var pp = phonePortrait();
+    var b = intro.querySelector(".i-rotatebar");
+    if (pp && !b) {
+      b = document.createElement("div");
+      b.className = "i-rotatebar";
+      b.innerHTML = "📱 Rotate your phone to <b>landscape</b> to start — " +
+                    "the explorer opens automatically when you do.";
+      intro.prepend(b);
+    } else if (!pp && b) { b.remove(); }
+    if (ready && !pp) dismiss();     // rotated to landscape → straight into the app
+    render();
+  }
+  window.addEventListener("resize", syncRotate);
+  window.addEventListener("orientationchange", syncRotate);
+  syncRotate();
+
   /* ---------------- grace window: cached loads never see the intro ---------------- */
 
   setTimeout(function () {
-    if (!ready) { state = "hook"; intro.innerHTML = HOOK_HTML + PRIMER_HTML; wire(); render(); }
+    if (!ready) { state = "hook"; intro.innerHTML = HOOK_HTML + PRIMER_HTML; wire(); syncRotate(); render(); }
   }, GRACE_MS);
 
   /* ---------------- markup ---------------- */
@@ -108,22 +139,13 @@
 
   var HOOK_HTML =
     '<div class="i-hook">' +
-      '<div class="i-kicker">While the explorer boots in your browser — make a call</div>' +
+      '<div class="i-kicker">While the explorer boots in your browser</div>' +
       '<h1>Frontier AI labs lose billions every year.<br>Will the leading edge ever pay?</h1>' +
       '<p class="i-sub">Frontier labs spend tens of billions a year training ever-better models. ' +
         'Whether the frontier ever pays hinges on a tension: the physical buildout that drives it — ' +
         'power, fabs, capital — must eventually slow, even as recursive self-improvement could ' +
-        'accelerate algorithmic progress. ' +
-        "What's your prior?</p>" +
-      '<div class="i-choices">' +
-        '<button class="i-choice" data-k="soon"><b>Profitable within 5 years</b>' +
-          '<span>the lead is durable enough to charge for</span></button>' +
-        '<button class="i-choice" data-k="late"><b>Eventually — but not soon</b>' +
-          '<span>only once the scaling race cools off</span></button>' +
-        '<button class="i-choice" data-k="never"><b>Never at the frontier</b>' +
-          '<span>rivals catch up too fast; the rent melts</span></button>' +
-      '</div>' +
-      '<div class="i-dials">' +
+        'accelerate algorithmic progress.</p>' +
+      '<div class="i-dials i-on">' +
         '<h2>The model says: it hinges on three dials</h2>' +
         '<div class="i-dial"><div class="i-num">1</div><div>' +
           '<h3>How fast the compute race decelerates</h3>' +
@@ -245,27 +267,7 @@
   var step = 0;
   function $(sel) { return intro.querySelector(sel); }
 
-  function pick(b, save) {
-    intro.querySelectorAll(".i-choice").forEach(function (c) {
-      c.classList.toggle("i-picked", c === b);
-    });
-    $(".i-dials").classList.add("i-on");
-    if (save) try {
-      localStorage.setItem("fl_guess", b.dataset.k);
-      localStorage.setItem("fl_guess_at", new Date().toISOString());
-    } catch (e) {}
-  }
-
   function wire() {
-    intro.querySelectorAll(".i-choice").forEach(function (b) {
-      b.addEventListener("click", function () { pick(b, true); });
-    });
-    // Repeat slow-boot visits: remember and pre-mark the visitor's earlier call.
-    try {
-      var saved = localStorage.getItem("fl_guess");
-      var prev = saved && intro.querySelector('.i-choice[data-k="' + saved + '"]');
-      if (prev) pick(prev, false);
-    } catch (e) {}
     $(".i-primerlink").addEventListener("click", function () {
       state = "primer"; intro.classList.add("i-show-primer"); render();
     });
@@ -280,12 +282,13 @@
         '<div class="i-min"><div class="i-spin"></div><div>Loading the explorer…</div>' +
         '<div class="i-minbar"><i></i></div>' +
         '<small>It opens by itself the moment Python finishes booting.</small></div>';
+      syncRotate();
     });
-    $(".i-ringbtn").addEventListener("click", function () { if (ready) dismiss(); });
+    $(".i-ringbtn").addEventListener("click", function () { if (ready && !phonePortrait()) dismiss(); });
     $(".i-back").addEventListener("click", function () { if (step > 0) { step--; render(); } });
     $(".i-next").addEventListener("click", function () {
       if (step < STEPS.length - 1) { step++; render(); }
-      else if (ready) dismiss();
+      else if (ready && !phonePortrait()) dismiss();
     });
   }
 
@@ -299,9 +302,9 @@
     var ring = $(".i-ring-fg");
     if (ring) ring.style.strokeDashoffset = (RING_CIRC * (1 - frac)).toFixed(1);
     var wrap = $(".i-ringwrap"), btn = $(".i-ringbtn");
-    if (ready && wrap && !wrap.classList.contains("i-done")) {
+    if (ready && wrap) {
       wrap.classList.add("i-done");
-      btn.innerHTML = "Open the<br>explorer →";
+      btn.innerHTML = phonePortrait() ? "rotate to<br>landscape 📱" : "Open the<br>explorer →";
     } else if (!ready && btn) {
       btn.innerHTML = "booting…<br><span class='i-ringpct'>" + pct + "%</span>";
     }
@@ -317,8 +320,9 @@
     if (back) back.disabled = step === 0;
     if (next) {
       if (step === STEPS.length - 1) {
-        next.textContent = ready ? "Open the explorer →" : "Finishing boot… " + pct + "%";
-        next.classList.toggle("i-primary", ready);
+        next.textContent = !ready ? "Finishing boot… " + pct + "%"
+          : (phonePortrait() ? "Rotate to landscape 📱" : "Open the explorer →");
+        next.classList.toggle("i-primary", ready && !phonePortrait());
       } else {
         next.textContent = "Next →";
         next.classList.remove("i-primary");
