@@ -243,7 +243,14 @@ _D050_JS = r"""
      (Only the FUNCTION declarations live here — hoisted; the executable wiring runs after the
      listener registry __d050L is (re)initialised further down.) */
   var graphsOpen = false, drawerOpen = false, dismissRotate = false;
-  function modeFor() { var W = w.innerWidth; return W >= NARROW ? 'wide' : (W >= PHONE ? 'narrow' : 'phone'); }
+  /* (D-052) PHONE is decided by the SMALLER viewport dimension, so a phone stays 'phone' in
+     LANDSCAPE too (e.g. 844×390): single column + ☰ drawer + full-width Graphs overlay. The old
+     width-only rule put a landscape phone in 'narrow', where the 330px static sidebar ate half
+     the screen and the charts column was unreachable. Desktop-narrow windows are unaffected
+     (their height comfortably exceeds the phone breakpoint). */
+  function modeFor() { var W = w.innerWidth;
+    if (Math.min(w.innerWidth, w.innerHeight) < PHONE) return 'phone';
+    return W >= NARROW ? 'wide' : 'narrow'; }
   function applyMode() {
     var m = modeFor();
     R.setAttribute('data-app-mode', m);
@@ -266,7 +273,10 @@ _D050_JS = r"""
        the tabbed pane folds away (no .st-key-pane_tab), so close the overlay too — otherwise it
        would cover the calibration panel */
     if (graphsOpen && !d.querySelector('.st-key-pane_tab')) { graphsOpen = false; applyMode(); }
-    var real = d.querySelector('.st-key-pane_tab button[data-variant="segmented_control"]');
+    /* (D-052) fallback selector: the stlite web build bundles Streamlit 1.57, whose segmented
+       buttons may not carry data-variant — any pane_tab button then anchors the injected tab */
+    var real = d.querySelector('.st-key-pane_tab button[data-variant="segmented_control"]') ||
+               d.querySelector('.st-key-pane_tab button');
     if (real && !d.getElementById('graphsTab')) {
       var b = d.createElement('button');
       b.id = 'graphsTab'; b.type = 'button'; b.textContent = 'Graphs';
@@ -389,7 +399,7 @@ _D050_JS = r"""
      can register. Picking a real text tab closes the charts overlay; then publish the mode. */
   on(d, 'click', function (e) {
     var t = e.target; if (!t || !t.closest) return;
-    var seg = t.closest('.st-key-pane_tab button[data-variant="segmented_control"]');
+    var seg = t.closest('.st-key-pane_tab button');   /* (D-052) variant-attr-free: works on 1.57 too */
     if (seg && seg.id !== 'graphsTab' && graphsOpen) { graphsOpen = false; applyMode(); }
   });
   applyMode();
@@ -484,6 +494,13 @@ def _layout_css(light):
           section[data-testid="stSidebar"] div[style*="col-resize"]
             { display: none !important; }
           html[data-sb-collapsed] section[data-testid="stSidebar"] { display: none; }
+          /* (D-053) drop the dead air above the "Parameters" title: the sidebar header strip
+             collapses to its buttons and the user content loses its ~6rem top padding */
+          section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"]
+            { padding-top: 0.8rem; padding-bottom: 2.4rem; /* clears the full-width footer */ }
+          section[data-testid="stSidebar"] [data-testid="stSidebarHeader"]
+            { padding-top: 0.4rem; padding-bottom: 0; min-height: 0; }
+          section[data-testid="stSidebar"] h1 { padding-top: 0; }
 
           /* frozen top bar. Streamlit wraps every element in a stLayoutWrapper exactly its
              own height, so `sticky` must go on the WRAPPER (a sticky child of a same-height
@@ -524,7 +541,7 @@ def _layout_css(light):
             height: 100vh; overflow-y: auto; overflow-x: hidden; z-index: 99;
             background-color: __PANEL_BG__;
             border-left: 1px solid rgba(128,128,128,0.2);
-            padding: 2.3rem 0.7rem 1.2rem; }
+            padding: 2.3rem 0.7rem 2.4rem; /* bottom clears the full-width footer (D-053) */ }
           html[data-charts-collapsed] .st-key-chartscol { display: none; }
           [data-testid="stColumn"]:has(.st-key-chartscol) {
             flex: 0 0 calc(var(--charts-w) - __GUTTER__) !important;
@@ -554,14 +571,22 @@ def _layout_css(light):
           /* ---- D-051 page heading (spans the middle pane, above the sticky top strip) ---- */
           [data-testid="stLayoutWrapper"]:has(> .st-key-apptitle)
             { width: calc(100% - (var(--charts-w) - __GUTTER__)) !important; }
-          .st-key-apptitle { padding: 0.1rem 0 0.35rem 0; }
+          /* (D-053) the title reads as a BAR: centered, panel-grey like the side panels */
+          .st-key-apptitle { padding: 0.45rem 1rem 0.55rem; text-align: center;
+            background: __PANEL_BG__; border-radius: 10px;
+            border: 1px solid rgba(128,128,128,0.15); }
+          /* the prose max-width cap (base CSS) would pin the title/footer text left — lift it */
+          .st-key-apptitle [data-testid="stMarkdownContainer"],
+          .st-key-appfooter [data-testid="stMarkdownContainer"]
+            { max-width: none !important; width: 100%; text-align: center; }
           .st-key-apptitle .apptitle-main { font-weight: 700; font-size: 1.85rem;
             line-height: 1.12; letter-spacing: -0.01em; }
           .st-key-apptitle .apptitle-sub { font-size: 0.98rem; opacity: 0.6; margin-top: 0.15rem; }
 
-          /* ---- D-051 author footer (quiet, both themes; middle-pane width) ---- */
-          .st-key-appfooter { position: fixed; bottom: 0; left: var(--sb-w); z-index: 90;
-            width: calc(100% - var(--sb-w) - (var(--charts-w) - __GUTTER__));
+          /* ---- D-051/D-053 author footer: quiet, FULL page width (spans over both side
+             panels — z-index above the fixed charts column and the native sidebar) ---- */
+          .st-key-appfooter { position: fixed; bottom: 0; left: 0; z-index: 999995;
+            width: 100%;
             background: __TOPBAR_BG__; border-top: 1px solid rgba(128,128,128,0.18);
             padding: 0.25rem 0 0.35rem; text-align: center;
             min-height: 1.7rem; align-items: center; justify-content: center; }
@@ -748,9 +773,6 @@ def _layout_css(light):
              is out of flow (narrow) or the sidebar is a drawer (phone) */
           html[data-app-mode="phone"] .st-key-apptitle .apptitle-main { font-size: 1.3rem; }
           html[data-app-mode="phone"] .st-key-apptitle .apptitle-sub { font-size: 0.85rem; }
-          html[data-app-mode="narrow"] .st-key-appfooter
-            { width: calc(100% - var(--sb-w)); }
-          html[data-app-mode="phone"] .st-key-appfooter { left: 0; width: 100%; }
           html[data-app-mode="narrow"] header[data-testid="stHeader"],
           html[data-app-mode="phone"]  header[data-testid="stHeader"] { right: 0 !important; }
 
