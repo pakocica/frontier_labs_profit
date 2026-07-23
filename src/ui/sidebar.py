@@ -230,10 +230,11 @@ def render(LEVEL):
             row.caption(capfn(d[pkey]))
 
     # ---- sidebar body ----------------------------------------------------------------
-    # D-050: the panel is titled by what it HOLDS (parameter controls); the assumptions
-    # prose folds away in a default-collapsed expander (Pavel).
+    # D-050: the panel is titled by what it HOLDS (parameter controls); the orientation
+    # prose folds away in a default-collapsed expander (Pavel). D-054 (round 2): the expander
+    # is titled by its CONTENT — it explains how the controls/observables work, not assumptions.
     st.sidebar.title("Parameters")
-    with st.sidebar.expander("Assumptions", expanded=False):
+    with st.sidebar.expander("How the controls work", expanded=False):
         st.caption(f"**Level {LEVEL}** — the controls are **observables** where one exists; the "
                    "small caption under each shows the implied parameter live. Dials without a "
                    "clean observable sit under *Model internals*. Raise the level (top of the "

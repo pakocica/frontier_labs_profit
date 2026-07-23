@@ -181,11 +181,7 @@ LEVEL_CARDS = {
         "of capability translates into $\\nu$ orders of magnitude of value), plus the margin "
         "$\\theta$ and today's training bill $S_0$. The follower has **no engine of its own** — "
         "pure catch-up — so the observed lag pins $\\delta \\approx$ ⟪DELTA⟫/yr and the gap "
-        "**holds steady at $\\Delta_0$**. Paying only for the **current** model, cost roughly "
-        "matches the rent — **per-model profit is about break-even** (the Anthropic pattern). "
-        "Each next level *adds* one mechanism: paying ahead for the next model (2), where growth "
-        "comes from (3), the compute slowdown (4), value saturation (5), and the anatomy of "
-        "catch-up (6)."),
+        "**holds steady at $\\Delta_0$**."),
     2: ("Training in advance",
         "**Adds the training lead time $\\ell$.** A frontier model isn't free when it ships — its "
         "compute is **bought $\\ell$ years in advance**. So today's bill is for the *next*, bigger "

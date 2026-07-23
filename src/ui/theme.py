@@ -807,14 +807,15 @@ def _layout_css(light):
              on BOTH local 1.59 and deployed stlite 1.57). So the mounted plots are effectively
              this default value, uniform across tabs. Make it a viewport-fitted clamp (not a flat
              300px) so a two-chart stack fits a short laptop on load, and size the chrome term to
-             the LARGEST-chrome 2-chart tab (Model path, which keeps its how-to-read expander:
-             measured ≈15.7rem of chrome, stable across the 14–18px fluid-font range) so NO 2-chart
-             tab overflows. The chrome is in rem so it tracks the fluid font. 15rem sits a hair
-             under 15.7 — within the column's ~15px footer-clearance buffer for Model path, while
-             letting the lower-chrome Finance charts fill more of the panel. The shim then refines
-             the CONTAINER via --chart-h (correct per tab & width); the plot re-fits to it on the
-             next rerun (any interaction). */
-          :root { --chart-h: clamp(150px, calc((100vh - 15rem) / 2), 560px); }
+             the LARGEST-chrome 2-chart group so NO 2-chart group overflows. After the D-054 round-2
+             declutter (section headers + the how-to-read expander removed) BOTH groups (Graphs and
+             Capability) have ≈9.7rem of chrome (measured at the 14px font floor of wide mode; a
+             touch less at 18px since the fixed tab-strip px shrink in rem terms), so a single
+             constant fits both AND the group-switch carry-over can't overflow (equal budgets).
+             10.5rem sits just above 9.7 with a small cushion. The chrome is in rem so it tracks the
+             fluid font. The shim then refines the CONTAINER via --chart-h (correct per group &
+             width); the plot re-fits to it on the next rerun (any interaction). */
+          :root { --chart-h: clamp(150px, calc((100vh - 10.5rem) / 2), 560px); }
           .st-key-chartscol [data-testid="stPlotlyChart"] { height: var(--chart-h) !important; }
 
           /* ================= D-051 responsive modes (data-app-mode = wide|narrow|phone) =========

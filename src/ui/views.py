@@ -74,8 +74,7 @@ def _tabbed_pane(d, p, LEVEL):
         if tab == "Introduction":
             st.caption("A **leader** (the frontier lab(s)) races ahead while a **follower** "
                        "(open-source / competitive fringe) catches up. **This explorer is "
-                       "layered:** raise the level (top bar) to add one mechanism at a time. "
-                       "The sidebar, equations, and tiles grow with the level.")
+                       "layered:** raise the level (top bar) to add one mechanism at a time.")
             level_card(LEVEL, d)
             with st.expander("Notation & conventions — grows with the level", expanded=False):
                 st.markdown("\n\n".join(NOTATION_SECTIONS[L] for L in range(1, LEVEL + 1)))
@@ -97,21 +96,21 @@ def _finance_tile(d, sim, hl, LEVEL, mode_mc, mc_key):
     Returns True when the MC corner reported an inspection change (caller reruns)."""
     need_rerun = False
     with st.container(border=True):
-        st.markdown("**Finance — is the leader profitable?**")
+        # D-054 (round 2): no section header (the group switch names it) and no how-to-read —
+        # each chart title is self-explanatory instead.
         if mode_mc:
             mc_headline(mc_key, show_blowup=(LEVEL >= 3))
             need_rerun = mc_panel_fin(mc_key, visible=True, show_blowup=(LEVEL >= 3))
         else:
-            # D-047/D-054 declutter: no verdict cards, no sanity line, no how-to-read expander —
-            # the graphs carry it; the profit title now names the leader so first-time viewers
-            # know whose profit it is without the removed explainer.
-            f = fig_base("Leader profit  Π  ($B/yr)", "year", "$/yr  ($B)", height=230)
+            f = fig_base("Leader profit — revenue minus cost  Π  ($B/yr)", "year",
+                         "$/yr  ($B)", height=230)
             line(f, sim["t"], sim["profit"], "profit  Π", C_PROFIT)
             # no plotted break-even line — the axis zeroline marks 0; keep 0 inside the y-range
             if float(np.min(sim["profit"])) >= 0.0 or float(np.max(sim["profit"])) <= 0.0:
                 f.update_yaxes(rangemode="tozero")
             show(f, key="pt_profit")
-            f = fig_base("Revenue vs cost  ($B/yr)", "year", "$/yr  ($B)", height=230)
+            f = fig_base("Revenue (gap rent) vs compute cost  ($B/yr)", "year", "$/yr  ($B)",
+                         height=230)
             line(f, sim["t"], sim["revenue"], "revenue  (gap rent θ·ΔW)", C_REV)
             line(f, sim["t"], sim["cost"], "cost", C_COST, dash="dash")
             show(f, key="pt_revcost")
@@ -124,33 +123,16 @@ def _model_tile(d, sim, LEVEL, mode_mc, mc_key):
     served = d["tau"] > 0.0                 # x^R differs from x^L only under a release delay
     show_growth = LEVEL >= 3
     with st.container(border=True):
-        st.markdown("**Model path — capability & the gap**")
+        # D-054 (round 2): no section header (the group switch names it) and no how-to-read —
+        # each chart title is self-explanatory instead.
         if mode_mc:
             mc_panel_path(mc_key)
             st.caption("The gap $\\Delta$ is what the leader earns rent on — its forecast fan "
                        "drives the Finance fans above. y-axis in OOM above today's frontier.")
             return
-        intro_what = ("How the **leader**'s (blue) and **follower**'s (orange) capability "
-                      "evolve, and the gap between them.")
-        if show_growth:
-            intro_what = ("How compute, algorithmic progress and capability evolve for the "
-                          "**leader** (blue) and **follower** (orange), and the gap between "
-                          "them.")
-        if LEVEL >= 7:
-            intro_what += (" When a release delay is set, the served model $x^R$ (dashed) also "
-                           "appears — otherwise it coincides with $x^L$ and is hidden.")
-        intro_how = ("All y-axes are in **OOM** above today's frontier (today = 0). Capability "
-                     "= compute + algorithmic progress; the follower trailing the leader is "
-                     "the gap $\\Delta$.")
-        if show_growth:
-            intro_how += (" The $\\psi$-share line is a health check on the AI self-improvement "
-                          "feedback — past the dashed 25% line it is no longer a small "
-                          "correction.")
-        with st.expander("how to read", expanded=False):
-            tab_intro(intro_what, intro_how)
 
-        cap_ttl = ("Capability  x  (developed, served & follower)" if served
-                   else "Capability  x  (leader & follower)")
+        cap_ttl = ("Capability over time — developed, served & follower  x" if served
+                   else "Capability over time — leader vs follower  x")
         f = fig_base(cap_ttl, "year", "OOM above 2026 frontier", height=230)
         line(f, sim["t"], sim["x_L"], "leader" + (" developed" if served else "") + "  xᴸ",
              C_LEADER)
@@ -159,8 +141,8 @@ def _model_tile(d, sim, LEVEL, mode_mc, mc_key):
         line(f, sim["t"], sim["x_F"], "follower  xᶠ", C_FOLLOWER)
         show(f, key="pt_cap")
 
-        gap_ttl = ("Capability gap  Δ  and  ψ-share (RSI health check)" if show_growth
-                   else "Capability gap  Δ = xᴸ − xᶠ")
+        gap_ttl = ("Capability gap  Δ  &  RSI-feedback share  ψ" if show_growth
+                   else "Capability gap — how far ahead the leader is  Δ = xᴸ − xᶠ")
         gap_ylab = "OOM (gap)   /   share (ψ)" if show_growth else "OOM"
         f = fig_base(gap_ttl, "year", gap_ylab, height=230)
         # anchor at 0 so a (near-)constant gap reads flat instead of auto-zooming into
@@ -178,12 +160,13 @@ def _model_tile(d, sim, LEVEL, mode_mc, mc_key):
         if show_growth:
             with st.expander("Compute & algorithmic progress (the two engines behind x)",
                              expanded=False):
-                f = fig_base("Compute  c(t)", "year", "OOM above 2026 frontier", height=220)
+                f = fig_base("Compute — leader vs follower  c(t)", "year",
+                             "OOM above 2026 frontier", height=220)
                 line(f, sim["t"], sim["c_L"], "leader  cᴸ", C_LEADER)
                 line(f, sim["t"], sim["c_F"], "follower  cᶠ", C_FOLLOWER)
                 show(f, key="pt_comp")
-                f = fig_base("Algorithmic progress  a(t)", "year", "OOM above 2026 frontier",
-                             height=220)
+                f = fig_base("Algorithmic progress — leader vs follower  a(t)", "year",
+                             "OOM above 2026 frontier", height=220)
                 line(f, sim["t"], sim["a_L"], "leader  aᴸ", C_LEADER)
                 line(f, sim["t"], sim["a_F"], "follower  aᶠ", C_FOLLOWER)
                 show(f, key="pt_algo")
@@ -309,14 +292,16 @@ def _charts_column(d, items, sim, hl, p, LEVEL, mode_mc, mc_key, sample_keys):
     with st.container(key="chartscol"):
         # ---- the group switch (same segmented idiom as the middle pane's tabs); the shadow
         # mem key is belt-and-braces for widget GC, mirroring the pane_tab pattern
-        _reg("charts_tab", st.session_state.get("_charts_tab_mem", "Finance"))
-        tab = st.segmented_control("Charts", ["Finance", "Model path"], key="charts_tab",
+        # D-054 (round 2): the switch already names the visible group, so the per-group
+        # section headers were dropped — options renamed to Graphs (finance/profit) | Capability.
+        _reg("charts_tab", st.session_state.get("_charts_tab_mem", "Graphs"))
+        tab = st.segmented_control("Charts", ["Graphs", "Capability"], key="charts_tab",
                                    label_visibility="collapsed",
                                    help="One chart group at a time. The Monte-Carlo "
                                         "accumulation keeps running whichever is shown.") \
-            or "Finance"
+            or "Graphs"
         st.session_state["_charts_tab_mem"] = tab
-        fin_vis = tab == "Finance"
+        fin_vis = tab == "Graphs"
         _warnings(sim, LEVEL)
         if mode_mc:
             with st.expander("How to read the Monte-Carlo fans", expanded=False):
