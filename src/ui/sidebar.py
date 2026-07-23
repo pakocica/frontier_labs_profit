@@ -230,11 +230,14 @@ def render(LEVEL):
             row.caption(capfn(d[pkey]))
 
     # ---- sidebar body ----------------------------------------------------------------
-    st.sidebar.title("Assumptions")
-    st.sidebar.caption(f"**Level {LEVEL}** — the controls are **observables** where one exists; the "
-                       "small caption under each shows the implied parameter live. Dials without a "
-                       "clean observable sit under *Model internals*. Raise the level (top of the "
-                       "page) to add the next mechanism. Defaults are provisional → calibration.")
+    # D-050: the panel is titled by what it HOLDS (parameter controls); the assumptions
+    # prose folds away in a default-collapsed expander (Pavel).
+    st.sidebar.title("Parameters")
+    with st.sidebar.expander("Assumptions", expanded=False):
+        st.caption(f"**Level {LEVEL}** — the controls are **observables** where one exists; the "
+                   "small caption under each shows the implied parameter live. Dials without a "
+                   "clean observable sit under *Model internals*. Raise the level (top of the "
+                   "page) to add the next mechanism. Defaults are provisional → calibration.")
 
 
     # The reset registry is rebuilt from scratch each run, so it always lists exactly the controls the

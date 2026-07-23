@@ -27,8 +27,7 @@ from .levels import level_card
 from .mc import (MC_CAP, mc_accumulate, mc_headline, mc_panel_fin, mc_panel_path, mc_prepare)
 from .model_access import NB, m
 from .simcache import delay_cached, sim_window_cached
-from .state import (_reg, cal_open, charts_open, close_cal, close_charts, mc_active,
-                    open_charts)
+from .state import _reg, cal_open, close_cal, mc_active
 from .theme import (C_COST, C_FOLLOWER, C_GAP, C_LEADER, C_PROFIT, C_PSI, C_REV,
                     C_SERVED, NEUTRAL, PAL, TAU_RAMP, WINDOW_COLS, fig_base, line,
                     show, tab_intro)
@@ -199,21 +198,6 @@ def _model_tile(d, sim, LEVEL, mode_mc, mc_key):
                            "$a$ can overtake the leader's $a$ while its total capability $x$ "
                            "still trails — the compute deficit is what keeps the gap open.")
 
-        # ---- one-line "so what": where the race ends up at these settings
-        _gap0, _gapT = float(sim["Delta"][0]), float(sim["Delta"][-1])
-        _spd = (float(sim["x_L"][-1]) - float(sim["x_L"][0])) / d["T"]
-        if abs(_gapT - _gap0) < 0.1:
-            _gap_txt = ("roughly **stationary** — catch-up just balances the leader's speed "
-                        "advantage")
-        elif _gapT < _gap0:
-            _gap_txt = "**narrowing** — catch-up outpaces the leader's speed advantage"
-        else:
-            _gap_txt = "**widening** — the leader outruns the follower's catch-up"
-        st.markdown(f"**Takeaway at these settings.** The leader advances ~**{_spd:.2f} "
-                    f"OOM/yr** on average, and the capability gap goes from {_gap0:.2f} to "
-                    f"**{_gapT:.2f} OOM** by year {d['T']:.0f}: {_gap_txt}. The gap is what "
-                    "the leader earns rent on — see the Finance tile.")
-
 
 def _delay_section(d, items, LEVEL):
     """Release delay (Level 7 — UNREACHABLE while MAX_LEVEL = 6, kept for the D-044 revert).
@@ -322,26 +306,24 @@ def _hood_section(p, hl):
             st.code(src, language="python")
 
 
-def _charts_strip(mc_key, LEVEL):
-    """The collapsed state of the RIGHT chart panel (D-048): just a floating « control at the
-    window's top right — the mirror image of the collapsed sidebar's » control. The finance
-    MC component stays mounted HIDDEN here, so the background accumulation keeps ticking
-    while the charts are away."""
-    with st.container(key="chartsstrip"):
-        st.button("«", key="charts_open_btn", on_click=open_charts,
-                  help="open the chart panel")
-        if mc_panel_fin(mc_key, visible=False, show_blowup=(LEVEL >= 3)):
-            st.rerun()
-
-
 def _charts_column(d, items, sim, hl, p, LEVEL, mode_mc, mc_key, sample_keys):
-    """The right chart panel (D-047): a fixed ~360px collapsible column — warnings, Finance
-    tile, Model-path tile, then the level-gated extras. In Point-forecast mode the finance MC
-    component is still mounted (hidden) so the background accumulation keeps ticking."""
+    """The right chart panel: a fixed drag-collapsible column (D-050 — the divider, the » and
+    the collapsed strip are CLIENT-side, injected by theme.inject_frontend_js; the server
+    always renders this column, so collapsing only CSS-hides it and the MC finance component
+    stays mounted with its background accumulation ticking). Content: a Finance | Model path
+    switch (one tile group at a time — Pavel; charts inside a group still stack vertically),
+    with warnings on top and the level-gated extras under Finance."""
     with st.container(key="chartscol"):
-        with st.container(key="chartshide"):
-            st.button("»", key="charts_close_btn", on_click=close_charts,
-                      help="collapse the chart panel — the middle pane takes the space")
+        # ---- the group switch (same segmented idiom as the middle pane's tabs); the shadow
+        # mem key is belt-and-braces for widget GC, mirroring the pane_tab pattern
+        _reg("charts_tab", st.session_state.get("_charts_tab_mem", "Finance"))
+        tab = st.segmented_control("Charts", ["Finance", "Model path"], key="charts_tab",
+                                   label_visibility="collapsed",
+                                   help="One chart group at a time. The Monte-Carlo "
+                                        "accumulation keeps running whichever is shown.") \
+            or "Finance"
+        st.session_state["_charts_tab_mem"] = tab
+        fin_vis = tab == "Finance"
         _warnings(sim, LEVEL)
         if mode_mc:
             with st.expander("How to read the Monte-Carlo fans", expanded=False):
@@ -359,17 +341,22 @@ def _charts_column(d, items, sim, hl, p, LEVEL, mode_mc, mc_key, sample_keys):
                     "the **⊙ control** in the finance panel's corner steps through inspected "
                     "draws (dashed ticks on the sidebar range controls). Any value/range/mode "
                     "change restarts the accumulation. Profit is an undiscounted yearly flow.")
-        need_rerun = _finance_tile(d, sim, hl, LEVEL, mode_mc, mc_key)
-        _model_tile(d, sim, LEVEL, mode_mc, mc_key)
-        if not mode_mc:
-            # keep the finance component mounted HIDDEN: its heartbeat drives the background
-            # accumulation, so flipping the top-bar switch shows a ready fan instantly
+        need_rerun = False
+        if fin_vis:
+            need_rerun = _finance_tile(d, sim, hl, LEVEL, mode_mc, mc_key)
+            if LEVEL >= 7:
+                _delay_section(d, items, LEVEL)   # profit trade-off → rides with Finance
+            if LEVEL >= 9:
+                _hood_section(p, hl)
+        else:
+            _model_tile(d, sim, LEVEL, mode_mc, mc_key)
+        if not (mode_mc and fin_vis):
+            # CRITICAL invariant: exactly ONE finance-component mount per run. It is visible
+            # only on (MC mode ∧ Finance tab); in every other state it mounts HIDDEN so its
+            # heartbeat keeps the background accumulation ticking — switching tab or mode
+            # then shows a ready fan instantly.
             need_rerun = mc_panel_fin(mc_key, visible=False,
                                       show_blowup=(LEVEL >= 3)) or need_rerun
-        if LEVEL >= 7:
-            _delay_section(d, items, LEVEL)
-        if LEVEL >= 9:
-            _hood_section(p, hl)
         if need_rerun:
             st.rerun()   # corner click: propagate the inspected draw to the sidebar ticks
 
@@ -381,7 +368,6 @@ def render_main(d, items, sim, hl, p, LEVEL):
     Column ratios are cosmetic — the theme CSS pins the real widths."""
     mode_mc = mc_active()
     open_key = cal_open()
-    charts_on = charts_open()
     # ---- background Monte-Carlo accumulation runs on EVERY run (D-043) ---------------------
     mc_key, sample_keys, merge_delta, tro, pro = mc_prepare(d, LEVEL)
     mc_accumulate(items, mc_key, tuple(sample_keys), merge_delta, show_blowup=(LEVEL >= 3),
@@ -414,7 +400,4 @@ def render_main(d, items, sim, hl, p, LEVEL):
         with lcol:
             _tabbed_pane(d, p, LEVEL)
     with ccol:
-        if charts_on:
-            _charts_column(d, items, sim, hl, p, LEVEL, mode_mc, mc_key, sample_keys)
-        else:
-            _charts_strip(mc_key, LEVEL)
+        _charts_column(d, items, sim, hl, p, LEVEL, mode_mc, mc_key, sample_keys)

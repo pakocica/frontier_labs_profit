@@ -2,6 +2,7 @@
 """
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 # ---- "two-hue semantic" palette (D-040): leader = BLUE family, follower = ORANGE family, on
 #      every chart (deterministic model paths AND the MC panels). Derived/diagnostic series are
@@ -91,12 +92,16 @@ def fig_base(title, xlabel, ylabel, height=230):
     """Theme-neutral figure sized for the narrow right chart panel (D-047): compact margins
     and fonts, title pinned to the container top with the legend on its own row below it.
     No explicit backgrounds/templates so `st.plotly_chart(fig, theme='streamlit')` can
-    restyle it to follow the app's light/dark theme; trace colors come from the PAL palette."""
+    restyle it to follow the app's light/dark theme; trace colors come from the PAL palette.
+    D-051: the figure is RESPONSIVE (autosize, no fixed layout height) — its height is driven by
+    the chart container, which the shim sizes via the --chart-h CSS variable so the two stacked
+    charts fill most of the panel and re-fit to the panel width (the `height` arg is unused, kept
+    for call-site compatibility)."""
     fig = go.Figure()
     fig.update_layout(
         title=dict(text=title, x=0, y=1, yanchor="top", yref="container", pad=dict(t=4),
                    font=dict(size=13)),
-        height=height, margin=dict(l=44, r=10, t=48, b=32),
+        autosize=True, margin=dict(l=44, r=10, t=48, b=32),
         font=dict(size=10),
         showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1.0,
@@ -118,8 +123,9 @@ def line(fig, x, y, name, color, dash=None, width=2):
 def show(fig, key=None):
     """Render a figure with Streamlit-native theming so it follows the app's light/dark theme.
     A stable `key` lets Streamlit update the chart in place across reruns (no remount flash) —
-    used by the live Monte-Carlo view."""
-    st.plotly_chart(fig, use_container_width=True, theme="streamlit", key=key)
+    used by the live Monte-Carlo view. D-051: `height="stretch"` makes the chart fill its element
+    container, whose height the shim drives via the --chart-h CSS variable (see _layout_css)."""
+    st.plotly_chart(fig, use_container_width=True, theme="streamlit", key=key, height="stretch")
 
 
 def tab_intro(what, how):
@@ -129,29 +135,356 @@ def tab_intro(what, how):
 
 
 
+# ================================================================= D-049/D-050 panel geometry
+# The right chart panel MIRRORS the native sidebar: both DEFAULT to the SAME width, derived by
+# construction from Streamlit's real sidebar default. That default is 300px — a `re-resizable`
+# element, width clamped to [200, 600], remembered in localStorage under `sidebarWidth` — NOT the
+# 16rem sometimes assumed (verified in the installed Streamlit 1.59 bundle). Pavel's spec: equal
+# defaults, both bumped +10% → PANEL_W_PX = round(1.10 · 300) = 330.
+#
+# D-050 makes BOTH panels drag-adjustable with snap-to-collapse, entirely CLIENT-side:
+#   · the right panel's width lives in ONE root CSS variable (--charts-w on <html>), set by the
+#     injected shim and persisted in localStorage; every dependent width (spacer column, header
+#     cut-off, top-strip width) is a calc() off that variable, so a drag reflows the whole layout
+#     live — no server round-trip, no rerun churn, and reruns/level switches can't reset it
+#     (Streamlit never touches <html>'s inline style or extra <body> children);
+#   · dragging the divider below PANEL_SNAP_PX collapses the panel into a PANEL_STRIP_PX-wide
+#     clickable strip (arrow + vertical label); clicking the strip reopens at the PRE-drag width;
+#   · the server always renders the chart column — collapse only CSS-hides it, so the MC finance
+#     component stays MOUNTED and its accumulation heartbeat keeps ticking by construction;
+#   · the LEFT panel (st.sidebar) gets the IDENTICAL mechanism (Pavel, v2): its native chrome —
+#     re-resizable drag handle, « collapse button, collapsed control — is suppressed and the
+#     same controller drives --sb-w / display:none + strip; Streamlit-side the sidebar stays
+#     "expanded" forever, so its content (and every sv_/rmv_ state pattern) is always mounted.
+SIDEBAR_DEFAULT_PX = 300                              # Streamlit's real re-resizable default
+PANEL_SCALE = 1.10                                    # "+10%" (Pavel)
+PANEL_W_PX = round(SIDEBAR_DEFAULT_PX * PANEL_SCALE)  # 330 — the shared default width
+PANEL_GUTTER_PX = 8                                   # spacer column sits this much inside the panel
+PANEL_SNAP_PX = 220     # released below this width → the panel snaps closed (both panels)
+PANEL_W_MIN_PX = PANEL_SNAP_PX                        # expanded drag clamp: [SNAP, MAX]
+PANEL_W_MAX_PX = 560
+PANEL_STRIP_PX = 26                                   # collapsed strip width (both panels)
+
+# D-051: fluid-font canvas (Pavel's chosen "D" system). On a wide monitor the whole app UI
+# ZOOMS — root font-size = clamp(viewport / FONT_CANVAS_REM, FONT_BASE_PX, FONT_MAX_PX) — so the
+# reading measure stays ~constant in CHARACTERS instead of the columns over-widening / lines
+# running too long. The divisor is tuned so font is 14px at ≈1500px and reaches 18px by ≈1930px,
+# then caps. Panel DEFAULT widths are expressed in rem (PANEL_W_REM = the 330px default at 14px)
+# so they scale WITH the font; a manual divider drag still pins an absolute px width (localStorage)
+# and the middle pane flexes around it — the drag feeds the MIDDLE, never the font. Because the
+# default is a continuous function of the font (no flex↔canvas mode switch), there is no width
+# seam as the viewport crosses the 1500px font-floor.
+FONT_BASE_PX = 14
+FONT_MAX_PX = 18
+FONT_CANVAS_REM = 107
+PANEL_W_REM = round(PANEL_W_PX / FONT_BASE_PX, 3)    # 23.571 → 330px at the 14px base
+
+# D-051 responsive modes (thresholds from the panel/middle floors, see the v3 prototype report):
+#   · WIDE  (≥ NARROW_BP): the full three-column layout (params | middle | charts).
+#   · NARROW (PHONE_BP … NARROW_BP): the fixed charts column can't coexist with the middle floor,
+#     so it hides and a client-injected "Graphs" tab overlays the SAME always-mounted charts
+#     column over the middle (single-mount preserved — the column is only CSS-shown/hidden).
+#   · PHONE (< PHONE_BP): single column; the parameter sidebar becomes a ☰ drawer.
+# The mode is a client-only decision (viewport width), published as the <html> data-app-mode
+# attribute by the shim; all mode CSS branches off it. Streamlit's own <768px auto-collapse /
+# column-stacking is overridden deliberately (our shim owns the sidebar and column widths).
+NARROW_BP_PX = 1100
+PHONE_BP_PX = 620
+
+
+# The D-050/D-049 shim. Runs INSIDE the component iframe against the same-origin parent DOM.
+# It normally executes once per page load (the host iframe stays mounted across reruns because
+# inject_frontend_js renders identical markup every run); if the iframe ever reloads, the
+# install is idempotent — old elements are replaced and old listeners/observers disconnected
+# via the parent-window registries (__d050L, __d050RO), never stacked.
+_D050_JS = r"""
+<script>(function () { try {
+  var w = window.parent || window, d = w.document, ls = w.localStorage, R = d.documentElement;
+  var SNAP = __SNAP__, MIN = __MIN__, MAX = __MAX__, STRIP = __STRIP__, DEF = __DEF__;
+  var FBASE = __FBASE__, FMAX = __FMAX__, FCANVAS = __FCANVAS__, PWREM = __PWREM__;
+  var NARROW = __NARROW__, PHONE = __PHONE__;   /* (D-051) responsive-mode viewport thresholds */
+
+  /* (D-051) fluid-font canvas: the whole UI zooms on wide monitors so the reading measure stays
+     ~constant in characters. curFont drives BOTH the root font-size and every rem-derived panel
+     default; recomputed on load and on window resize. */
+  var curFont = FBASE;
+  function calcFont() { return Math.max(FBASE, Math.min(FMAX, w.innerWidth / FCANVAS)); }
+  function applyFont() { curFont = calcFont(); R.style.fontSize = curFont + 'px'; }
+  function defW() { return Math.round(PWREM * curFont); }   /* rem-derived default panel width */
+  applyFont();
+
+  /* (D-051) graph-height system: the two stacked charts should fill most of the panel height.
+     Each Plotly chart height = clamp(150, min(width × aspect, per-chart vertical fill), 560) —
+     drag the panel narrower and they shorten; widen it and the height caps at the fill budget so
+     only the width grows. Driven client-side via the parent page's Plotly (relayout); debounced,
+     and a no-op when the height already matches so MC in-place updates don't thrash. Works for
+     the right column AND the narrow/phone overlay (same .st-key-chartscol charts). */
+  var CHART_ASPECT = 1.0, CHART_CHROME = 210, CHART_MIN = 150, CHART_MAX = 560, _szT = 0;
+  function sizeCharts() {
+    var col = d.querySelector('.st-key-chartscol');
+    if (!col) return;
+    var cw = col.getBoundingClientRect().width - 24;   /* minus the panel's horizontal padding */
+    if (cw <= 0) return;                                /* hidden (narrow, overlay closed) → skip */
+    var fill = (w.innerHeight - CHART_CHROME) / 2;      /* two charts share the vertical budget */
+    var h = Math.round(Math.max(CHART_MIN, Math.min(Math.min(cw * CHART_ASPECT, fill), CHART_MAX)));
+    if (R.style.getPropertyValue('--chart-h') !== h + 'px') {
+      R.style.setProperty('--chart-h', h + 'px');
+      poke(); w.setTimeout(poke, 280);                  /* nudge Plotly to re-fit (twice: the
+                                                           container height needs a frame to apply
+                                                           before the plot settles to it) */
+    }
+  }
+  function sizeChartsSoon() { if (_szT) w.clearTimeout(_szT); _szT = w.setTimeout(sizeCharts, 90); }
+
+  /* (D-051) responsive MODE — a client-only decision (viewport width) published as data-app-mode
+     on <html>; all mode CSS branches off it. In narrow/phone the fixed charts column can't sit
+     beside the middle, so a client 'Graphs' tab (graphsOpen) overlays the SAME always-mounted
+     column over the middle — the column is only CSS-shown/hidden, so the single MC mount holds.
+     (Only the FUNCTION declarations live here — hoisted; the executable wiring runs after the
+     listener registry __d050L is (re)initialised further down.) */
+  var graphsOpen = false, drawerOpen = false, dismissRotate = false;
+  function modeFor() { var W = w.innerWidth; return W >= NARROW ? 'wide' : (W >= PHONE ? 'narrow' : 'phone'); }
+  function applyMode() {
+    var m = modeFor();
+    R.setAttribute('data-app-mode', m);
+    if (m === 'wide') graphsOpen = false;          /* charts have their own column again */
+    R.setAttribute('data-graphs-open', graphsOpen ? '1' : '0');
+    var gt = d.getElementById('graphsTab');        /* mirror active state onto the injected tab */
+    if (gt) gt.setAttribute('data-selected', graphsOpen ? 'true' : 'false');
+    /* (D-051) PHONE: single column, the sidebar becomes a ☰ drawer; a portrait phone gets the
+       polite 'rotate to landscape' suggestion until dismissed. Leaving phone resets both. */
+    if (m !== 'phone') { drawerOpen = false; dismissRotate = false; }
+    R.setAttribute('data-sb-drawer', drawerOpen ? '1' : '0');
+    var portrait = w.innerHeight > w.innerWidth;
+    R.setAttribute('data-rotate', (m === 'phone' && portrait && !dismissRotate) ? '1' : '0');
+    sizeChartsSoon();                              /* re-fit chart heights to the new panel width */
+  }
+  /* the injected 'Graphs' tab (narrow/phone only, CSS-shown) appended beside the real pane tabs,
+     and a × on the overlay. Re-added by the observer if a rerun reconciles them away. */
+  function ensureGraphs() {
+    /* the Graphs overlay lives with the Intro/Equations tabs; when the calibration panel opens
+       the tabbed pane folds away (no .st-key-pane_tab), so close the overlay too — otherwise it
+       would cover the calibration panel */
+    if (graphsOpen && !d.querySelector('.st-key-pane_tab')) { graphsOpen = false; applyMode(); }
+    var real = d.querySelector('.st-key-pane_tab button[data-variant="segmented_control"]');
+    if (real && !d.getElementById('graphsTab')) {
+      var b = d.createElement('button');
+      b.id = 'graphsTab'; b.type = 'button'; b.textContent = 'Graphs';
+      b.className = real.className;                 /* copy the live (hashed) segmented-button look */
+      b.setAttribute('data-variant', 'segmented_control');
+      /* poke twice: charts that first laid out while the column was display:none need a
+         resize to paint, and a second delayed poke covers the show transition */
+      on(b, 'click', function () { graphsOpen = true; applyMode(); poke();
+        w.setTimeout(poke, 260); });
+      real.parentElement.appendChild(b);
+    }
+    var col = d.querySelector('.st-key-chartscol');
+    if (col && !d.getElementById('graphsClose')) {
+      var c = d.createElement('div');
+      c.id = 'graphsClose'; c.textContent = '×'; c.title = 'close charts';
+      on(c, 'click', function () { graphsOpen = false; applyMode(); });
+      d.body.appendChild(c);
+    }
+    /* (D-051) phone controls — the ☰ that slides the parameter sidebar in as a drawer, and the
+       portrait 'rotate' suggestion with a fall-through to the single-column view. Body-level, so
+       reruns never remove them; visibility is gated by data-app-mode / data-rotate in CSS. */
+    if (!d.getElementById('sbDrawerBtn')) {
+      var h = d.createElement('div');
+      h.id = 'sbDrawerBtn'; h.textContent = '☰'; h.title = 'parameters';
+      on(h, 'click', function () { drawerOpen = !drawerOpen; applyMode(); });
+      d.body.appendChild(h);
+    }
+    if (!d.getElementById('sbScrim')) {
+      var sc = d.createElement('div'); sc.id = 'sbScrim';
+      on(sc, 'click', function () { drawerOpen = false; applyMode(); });
+      d.body.appendChild(sc);
+    }
+    if (!d.getElementById('rotateOverlay')) {
+      var o = d.createElement('div'); o.id = 'rotateOverlay';
+      o.innerHTML = '<div class="rot-ic">📱</div>' +
+        '<div class="rot-h">This explorer works best in landscape</div>' +
+        '<div class="rot-p">Rotate your device, or continue in a simplified single-column view.</div>' +
+        '<a id="rotateContinue">Continue anyway →</a>';
+      d.body.appendChild(o);
+      on(d.getElementById('rotateContinue'), 'click', function () { dismissRotate = true; applyMode(); });
+    }
+  }
+
+  /* ---- idempotent re-install: the script normally runs ONCE per page load (the host iframe
+     stays mounted across reruns); if the iframe ever reloads, listeners/observers from the
+     dead realm are replaced via the parent-window registries, never stacked */
+  if (w.__d050RO) { try { w.__d050RO.disconnect(); } catch (e) {} }
+  (w.__d050L || []).forEach(function (p) { try { p[0].removeEventListener(p[1], p[2], p[3]); } catch (e) {} });
+  w.__d050L = [];
+  w.__d050Applies = [];   /* (D-051) per-install list of panel apply() closures for resize reflow */
+  function on(tgt, type, fn, cap) { tgt.addEventListener(type, fn, cap); w.__d050L.push([tgt, type, fn, cap]); }
+  ['chartsDivider', 'chartsStrip', 'chartsClose', 'sbDivider', 'sbStrip', 'sbClose']
+    .forEach(function (id) { var e = d.getElementById(id); if (e) e.remove(); });
+  function mk(id, html, title) { var e = d.createElement('div'); e.id = id; e.innerHTML = html;
+    e.title = title; d.body.appendChild(e); return e; }
+  /* the resize poke must use the PARENT realm's constructor (cross-realm events fail the
+     host page's instanceof guards — browser-verified) */
+  function poke() { try { w.dispatchEvent(new w.Event('resize')); } catch (e) {} } /* plotly */
+
+  /* (D-049) the level selector stays click/arrow-navigable but not typable */
+  function lvlFix() {
+    d.querySelectorAll('.st-key-topbar [data-testid="stSelectbox"] input').forEach(function (el) {
+      el.readOnly = true; el.setAttribute('inputmode', 'none'); el.style.caretColor = 'transparent'; });
+  }
+
+  /* ---- ONE controller, BOTH panels (D-050 v2): identical drag / snap / strip behavior.
+     Width lives in a root CSS variable (the layout is calc()'d off it), collapse in a root
+     attribute; both persist in localStorage, so reruns/level switches/reloads keep them. */
+  function panel(side, lsPre, varName, fromLeft, label, openTitle, closeGlyph, closeTitle) {
+    var kW = lsPre + 'W', kC = lsPre + 'C';
+    var aC = 'data-' + side + '-collapsed', aD = 'data-' + side + '-dragging';
+    /* (D-051) a stored width means the user has DRAGGED this panel → pin that px width; otherwise
+       the width tracks the rem-derived default defW() and reflows live as the font scales. */
+    var stored = ls.getItem(kW), hasW = stored != null;
+    var W = hasW ? parseInt(stored, 10) : defW();
+    if (hasW && !(W >= MIN && W <= MAX)) { hasW = false; W = defW(); }
+    var C = ls.getItem(kC) === '1';
+    function apply() { R.style.setProperty(varName, (C ? STRIP : (hasW ? W : defW())) + 'px');
+      if (C) R.setAttribute(aC, '1'); else R.removeAttribute(aC); }
+    function save() { hasW = true; ls.setItem(kW, String(W)); ls.setItem(kC, C ? '1' : '0'); }
+    (w.__d050Applies || (w.__d050Applies = [])).push(apply);   /* resize → re-eval rem default */
+    apply();
+    var arrOpen = fromLeft ? '\u00bb' : '\u00ab';   /* strip arrow points the OPEN direction */
+    var strip = mk(side + 'Strip',
+      '<span class="d050-arr">' + arrOpen + '</span><span class="d050-lbl">' + label + '</span>',
+      openTitle);
+    on(strip, 'click', function () { C = false; apply(); save(); poke(); });
+    var closer = mk(side + 'Close', closeGlyph, closeTitle);
+    on(closer, 'click', function () { C = true; apply(); save(); });
+    var div = mk(side + 'Divider', '', 'drag to resize; release narrow to collapse');
+    var drag = null;
+    on(div, 'pointerdown', function (e) { e.preventDefault();
+      if (!hasW) W = defW();             /* seed from the live rem default before the first drag */
+      drag = { w0: W };
+      try { div.setPointerCapture(e.pointerId); } catch (err) {}   /* iframes can't eat moves */
+      R.setAttribute(aD, '1'); });
+    on(div, 'pointermove', function (e) { if (!drag) return;
+      var nw = fromLeft ? e.clientX : (w.innerWidth - e.clientX);
+      if (nw < SNAP) { C = true; }                                  /* live snap preview */
+      else { C = false; W = Math.round(Math.min(MAX, Math.max(MIN, nw))); }
+      apply(); });
+    function end() { if (!drag) return;
+      if (C) W = drag.w0;                /* strip reopens at the PRE-drag width, not the min */
+      drag = null; R.removeAttribute(aD); apply(); save(); poke(); }
+    on(div, 'pointerup', end); on(div, 'pointercancel', end);
+  }
+  panel('charts', 'd050Charts', '--charts-w', false, 'CHARTS',
+        'open the chart panel', '\u00bb', 'collapse the chart panel');
+  panel('sb', 'd050Sb', '--sb-w', true, 'PARAMETERS',
+        'open the parameter panel', '\u00ab', 'collapse the parameter panel');
+
+  /* (D-051) window resize \u2192 rescale the font and reflow any non-dragged (rem-default) panels.
+     Must NOT call poke() here: poke() dispatches its OWN 'resize' (to nudge Plotly after a
+     collapse/drag that fires no native resize), so poking from the resize handler would recurse
+     infinitely. A native resize already reaches Plotly; a poke()-driven resize just reflows. */
+  on(w, 'resize', function () { applyFont(); applyMode();
+    (w.__d050Applies || []).forEach(function (f) { f(); }); sizeChartsSoon(); });
+
+  /* (D-051) executable Graphs wiring — here, AFTER the reset re-initialised __d050L so on()
+     can register. Picking a real text tab closes the charts overlay; then publish the mode. */
+  on(d, 'click', function (e) {
+    var t = e.target; if (!t || !t.closest) return;
+    var seg = t.closest('.st-key-pane_tab button[data-variant="segmented_control"]');
+    if (seg && seg.id !== 'graphsTab' && graphsOpen) { graphsOpen = false; applyMode(); }
+  });
+  applyMode();
+
+  /* the native sidebar must stay EXPANDED from Streamlit's point of view — our mechanism owns
+     collapse (display:none + strip), so its content stays mounted. If Streamlit auto-collapsed
+     it (narrow first paint), click it back open once. */
+  function sbForceOpen() {
+    var s = d.querySelector('section[data-testid="stSidebar"]');
+    if (s && s.getAttribute('aria-expanded') === 'false') {
+      var b = d.querySelector('[data-testid="stSidebarCollapsedControl"] button') ||
+              d.querySelector('[data-testid="stExpandSidebarButton"]');
+      if (b) b.click();
+    }
+  }
+
+  /* hover-reveal for the two collapse controls (the old sidebar's « idiom, mirrored) */
+  on(d, 'mouseover', function (e) {
+    var t = e.target; if (!t || !t.closest) return;
+    var oc = t.closest('.st-key-chartscol') || t.closest('#chartsClose') || t.closest('#chartsDivider');
+    var os = t.closest('section[data-testid="stSidebar"]') || t.closest('#sbClose') || t.closest('#sbDivider');
+    if (oc) R.setAttribute('data-charts-hover', '1'); else R.removeAttribute('data-charts-hover');
+    if (os) R.setAttribute('data-sb-hover', '1'); else R.removeAttribute('data-sb-hover');
+  });
+
+  /* ---- ONE observer for everything that must survive reruns ---- */
+  lvlFix(); sbForceOpen(); ensureGraphs(); sizeChartsSoon();
+  w.__d050RO = new MutationObserver(function () { lvlFix(); sbForceOpen(); ensureGraphs(); sizeChartsSoon(); });
+  w.__d050RO.observe(d.body, { childList: true, subtree: true,
+                               attributes: true, attributeFilter: ['aria-expanded'] });
+} catch (e) {} })();</script>
+"""
+
+
+def _frontend_js_html():
+    """The final shim markup with the geometry constants baked in (pure — testable)."""
+    return (_D050_JS
+            .replace("__SNAP__", str(PANEL_SNAP_PX))
+            .replace("__MIN__", str(PANEL_W_MIN_PX))
+            .replace("__MAX__", str(PANEL_W_MAX_PX))
+            .replace("__STRIP__", str(PANEL_STRIP_PX))
+            .replace("__DEF__", str(PANEL_W_PX))
+            .replace("__FBASE__", str(FONT_BASE_PX))
+            .replace("__FMAX__", str(FONT_MAX_PX))
+            .replace("__FCANVAS__", str(FONT_CANVAS_REM))
+            .replace("__PWREM__", str(PANEL_W_REM))
+            .replace("__NARROW__", str(NARROW_BP_PX))
+            .replace("__PHONE__", str(PHONE_BP_PX)))
+
+
+def inject_frontend_js():
+    """The widget's ONE injected-JS pass (D-049 + D-050), in a 0-height iframe that reaches the
+    same-origin parent. Rendered EVERY run with IDENTICAL markup: Streamlit then keeps the same
+    iframe mounted across reruns (skipping the render on later runs would unmount it and kill
+    the shim's observers and event listeners with its realm — the previous round's bug)."""
+    with st.container(key="fejs"):
+        components.html(_frontend_js_html(), height=0)
+
+
 # ======================================================================= D-043 layout CSS
-def inject_layout_css():
-    """Phase-2 layout (D-043, variant A2): the sticky top bar, the fixed-width docked
-    calibration panel and folded-pane strip columns (Streamlit columns are proportional, so
-    the fixed widths are imposed on the column that CONTAINS the keyed container), and the
-    compact sidebar row rhythm."""
+def _layout_css(light):
+    """The full layout stylesheet (pure — testable). Theme colors resolve from `light`; every
+    panel-dependent width is a calc() off the ONE --charts-w root variable (D-050): the shim
+    moves that variable during a divider drag and the whole layout (panel, spacer column,
+    header cut-off, top strip) reflows live, collapsed state included (--charts-w = strip)."""
     # the sticky bar needs an OPAQUE theme-matched background (content scrolls under it) and
     # the right chart panel the SIDEBAR's background; `--background-color` is not a defined
-    # CSS var in Streamlit 1.59, so resolve the app theme server-side (same best-effort read
-    # the MC component uses). Streamlit default secondary backgrounds: light #f0f2f6,
+    # CSS var in Streamlit 1.59, so the app theme is resolved server-side (same best-effort
+    # read the MC component uses). Streamlit default secondary backgrounds: light #f0f2f6,
     # dark #262730.
-    try:
-        _light = getattr(st.context.theme, "type", None) == "light"
-    except Exception:
-        _light = False
-    topbar_bg = "#ffffff" if _light else "#0e1117"
-    panel_bg = "#f0f2f6" if _light else "#262730"
-    # D-048: when the right panel is open, the header and the top strip stop at its edge
-    charts_on = bool(st.session_state.get("_charts_open", True))
-    header_right = "16rem" if charts_on else "0px"
-    topbar_mr = "15.5rem" if charts_on else "0.5rem"
+    topbar_bg = "#ffffff" if light else "#0e1117"
+    panel_bg = "#f0f2f6" if light else "#262730"
+    text_col = "#31333F" if light else "#fafafa"
     css = """
         <style>
+          /* D-050: the ONE panel-width variable. The shim overrides it inline on <html>
+             (persisted in localStorage); this rule is only the first-paint default. */
+          :root { --charts-w: __PANEL_W__; --sb-w: __PANEL_W__; }
+
+          /* D-050 v2 (Pavel: IDENTICAL behavior on both sides): the LEFT panel is st.sidebar
+             with its native chrome SUPPRESSED — width imposed by --sb-w (re-resizable's
+             inline width loses to !important; its drag handle and « button are hidden and
+             replaced by our injected mirror controls), collapse = display:none + the strip.
+             aria-expanded stays true forever, so the sidebar content is ALWAYS mounted and
+             the sv_/rmv_ hidden-row state patterns are untouched. */
+          section[data-testid="stSidebar"] {
+            width: var(--sb-w) !important; min-width: var(--sb-w) !important;
+            max-width: var(--sb-w) !important; transition: none !important; }
+          section[data-testid="stSidebar"] > div:first-child {
+            width: var(--sb-w) !important; transition: none !important; }
+          section[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"],
+          section[data-testid="stSidebar"] div[style*="col-resize"]
+            { display: none !important; }
+          html[data-sb-collapsed] section[data-testid="stSidebar"] { display: none; }
+
           /* frozen top bar. Streamlit wraps every element in a stLayoutWrapper exactly its
              own height, so `sticky` must go on the WRAPPER (a sticky child of a same-height
              parent has no room to stick — verified in-browser). `top` must clear Streamlit's
@@ -170,45 +503,74 @@ def inject_layout_css():
             { padding: 4.2rem 1.5rem 1rem 1.5rem; }
 
           /* ---- D-047 main region: [cal panel + fold strip (when open) | middle pane (flex)]
-             | right chart panel (fixed, collapsible). Rows must NOT wrap — a percentage or
-             fixed flex-basis ignores its siblings' widths and would push columns onto a
+             | right chart panel (fixed, drag-collapsible). Rows must NOT wrap — a percentage
+             or fixed flex-basis ignores its siblings' widths and would push columns onto a
              second row (verified in-browser). */
           [data-testid="stHorizontalBlock"]:has(.st-key-mainpane),
           [data-testid="stHorizontalBlock"]:has(.st-key-calpanel)
             { flex-wrap: nowrap !important; }
-          /* D-048: the right chart panel MIRRORS the sidebar — full height from the very top
-             of the window, the sidebar's background, the sidebar's default width (16rem).
-             The fixed panel sits out of flow; the spacer column below reserves its footprint
-             inside the block, so the middle pane ends a gutter before it. Collapsed, only a
-             floating « control remains (mirror of the sidebar's ») and the freed width flows
-             to the flexible middle pane. */
+          /* the injected-JS iframe (inject_frontend_js) carries no visual — collapse it */
+          .st-key-fejs { height: 0 !important; min-height: 0 !important;
+            margin: 0 !important; overflow: hidden; }
+          /* D-048/050: the right chart panel MIRRORS the sidebar — full height from the very
+             top of the window, the sidebar's background, and the live width --charts-w
+             (default 330px = 300px sidebar +10%; drag the divider to resize, D-050). The
+             fixed panel sits out of flow; the spacer column below reserves its footprint
+             inside the block, so the middle pane ends a gutter before it. The top padding
+             clears the injected » collapse control. Collapsed, the panel is display:none
+             (STILL MOUNTED — the MC component keeps ticking) and only the strip shows. */
           .st-key-chartscol {
-            position: fixed; top: 0; right: 0; width: 16rem;
+            position: fixed; top: 0; right: 0; width: var(--charts-w);
             height: 100vh; overflow-y: auto; overflow-x: hidden; z-index: 99;
             background-color: __PANEL_BG__;
             border-left: 1px solid rgba(128,128,128,0.2);
-            padding: 0.4rem 0.7rem 1.2rem; }
+            padding: 2.3rem 0.7rem 1.2rem; }
+          html[data-charts-collapsed] .st-key-chartscol { display: none; }
           [data-testid="stColumn"]:has(.st-key-chartscol) {
-            flex: 0 0 15.5rem !important; min-width: 15.5rem !important; }
-          [data-testid="stColumn"]:has(.st-key-chartsstrip) {
-            flex: 0 0 0px !important; min-width: 0px !important; }
-          .st-key-chartsstrip {
-            position: fixed; top: 0.55rem; right: 3.4rem; z-index: 999995; }
-          .st-key-chartsstrip button
-            { border: none; background: transparent; padding: 0.15rem 0.4rem;
-              font-size: 1.05rem; line-height: 1.2; opacity: 0.65; }
-          .st-key-chartsstrip button:hover { opacity: 1; color: #4c8dff; }
-          /* the Streamlit header stops where the right panel begins (it already starts after
-             the sidebar) — the ⋮ menu stays reachable left of the panel */
-          header[data-testid="stHeader"] { right: __HEADER_RIGHT__ !important;
+            flex: 0 0 calc(var(--charts-w) - __GUTTER__) !important;
+            min-width: calc(var(--charts-w) - __GUTTER__) !important; }
+          /* the Streamlit header stops where the right panel (or its strip) begins — the
+             ⋮ menu stays reachable left of it */
+          header[data-testid="stHeader"] { right: var(--charts-w) !important;
             width: auto !important; }
           /* the top strip belongs to the MIDDLE area only (width calc, not margin — the
              wrapper is width:100%, so a margin would overflow instead of shrinking it) */
           [data-testid="stLayoutWrapper"]:has(> .st-key-topbar)
-            { width: calc(100% - __TOPBAR_MR__) !important; }
+            { width: calc(100% - (var(--charts-w) - __GUTTER__)) !important; }
           /* top strip: level selector left, mode switch flush right */
           .st-key-topbar [data-testid="stSegmentedControl"]
             { display: flex; justify-content: flex-end; }
+          /* the "Model:" label sits flush against the level selector, vertically centred */
+          .st-key-topbar .model-label { text-align: right; font-weight: 600; opacity: 0.8;
+            white-space: nowrap; font-size: 0.95rem; }
+          /* the ⓘ level-explainer popover: hidden on wide (the selectbox tooltip covers it),
+             shown on narrow/phone where hover doesn't exist */
+          .st-key-levelinfo { display: none; }
+          html[data-app-mode="narrow"] .st-key-levelinfo,
+          html[data-app-mode="phone"]  .st-key-levelinfo { display: block; }
+          .st-key-levelinfo [data-testid="stPopover"] button { min-height: 1.6rem;
+            padding: 0 0.4rem; opacity: 0.7; } .st-key-levelinfo button:hover { opacity: 1; }
+
+          /* ---- D-051 page heading (spans the middle pane, above the sticky top strip) ---- */
+          [data-testid="stLayoutWrapper"]:has(> .st-key-apptitle)
+            { width: calc(100% - (var(--charts-w) - __GUTTER__)) !important; }
+          .st-key-apptitle { padding: 0.1rem 0 0.35rem 0; }
+          .st-key-apptitle .apptitle-main { font-weight: 700; font-size: 1.85rem;
+            line-height: 1.12; letter-spacing: -0.01em; }
+          .st-key-apptitle .apptitle-sub { font-size: 0.98rem; opacity: 0.6; margin-top: 0.15rem; }
+
+          /* ---- D-051 author footer (quiet, both themes; middle-pane width) ---- */
+          .st-key-appfooter { position: fixed; bottom: 0; left: var(--sb-w); z-index: 90;
+            width: calc(100% - var(--sb-w) - (var(--charts-w) - __GUTTER__));
+            background: __TOPBAR_BG__; border-top: 1px solid rgba(128,128,128,0.18);
+            padding: 0.25rem 0 0.35rem; text-align: center;
+            min-height: 1.7rem; align-items: center; justify-content: center; }
+          /* Streamlit's markdown wrapper carries a -18px bottom margin that collapses the
+             fixed bar to ~12px and pushes the text below the viewport — neutralize inside */
+          .st-key-appfooter div { margin: 0 !important; }
+          .st-key-appfooter .appfooter-inner { font-size: 0.72rem; opacity: 0.55; }
+          .st-key-appfooter a { color: inherit; text-decoration: underline; }
+          .st-key-appfooter a:hover { color: #4c8dff; opacity: 1; }
           /* the middle tabbed pane = the flexible remainder */
           [data-testid="stColumn"]:has(.st-key-mainpane) {
             flex: 1 1 0 !important; min-width: 320px !important; }
@@ -219,9 +581,7 @@ def inject_layout_css():
           [data-testid="stColumn"]:has(.st-key-calpanel) {
             flex: 1 1 0 !important; min-width: 320px !important; max-width: 560px !important; }
           [data-testid="stHorizontalBlock"]:has(.st-key-calpanel)
-            [data-testid="stColumn"]:has(.st-key-chartscol),
-          [data-testid="stHorizontalBlock"]:has(.st-key-calpanel)
-            [data-testid="stColumn"]:has(.st-key-chartsstrip)
+            [data-testid="stColumn"]:has(.st-key-chartscol)
             { margin-left: auto; }
           .st-key-calpanel { border-right: 1px solid rgba(128,128,128,0.25);
             padding-right: 10px; }
@@ -242,13 +602,68 @@ def inject_layout_css():
             { writing-mode: vertical-rl; height: 340px; width: 38px;
               padding: 10px 2px; font-size: 12px; color: inherit; opacity: 0.75; }
           .st-key-eqstrip button:hover { opacity: 1; }
-          /* the chart panel's collapse chevron: top-LEFT of the panel (mirror image of the
-             sidebar's « at its top-right) */
-          .st-key-chartshide { display: flex; justify-content: flex-start; }
-          .st-key-chartshide button
-            { border: none; background: transparent; padding: 0 4px; min-height: 1.2rem;
-              line-height: 1.2; font-size: 0.9rem; opacity: 0.6; }
-          .st-key-chartshide button:hover { opacity: 1; color: #4c8dff; }
+
+          /* ================= D-050 injected panel controls =================
+             the #*Divider / #*Strip / #*Close pairs are plain divs the shim
+             appends to <body> — OUTSIDE Streamlit's element tree, so reruns never remove
+             them; visibility is gated by the html-root attributes the shim maintains. */
+          /* the drag dividers straddle each panel's inner edge; a slim accent line appears
+             on hover / while dragging (VS Code idiom) — identical on both sides */
+          #chartsDivider, #sbDivider { position: fixed; top: 0; height: 100vh; width: 9px;
+            z-index: 999996; cursor: col-resize; }
+          #chartsDivider { right: calc(var(--charts-w) - 4px); }
+          #sbDivider { left: calc(var(--sb-w) - 4px); }
+          #chartsDivider::after, #sbDivider::after { content: ""; position: absolute;
+            left: 3px; top: 0; height: 100%; width: 3px; background: #4c8dff; opacity: 0;
+            transition: opacity 0.1s; }
+          #chartsDivider:hover::after,
+          html[data-charts-dragging] #chartsDivider::after,
+          #sbDivider:hover::after,
+          html[data-sb-dragging] #sbDivider::after { opacity: 0.55; }
+          html[data-charts-collapsed]:not([data-charts-dragging]) #chartsDivider
+            { display: none; }
+          html[data-sb-collapsed]:not([data-sb-dragging]) #sbDivider { display: none; }
+          html[data-charts-dragging] *, html[data-sb-dragging] *
+            { user-select: none !important; }
+
+          /* the collapsed strips (both panels, identical build): arrow on top + vertical
+             letter label, sidebar-colored, whole strip clickable with a hover tint */
+          #chartsStrip, #sbStrip { display: none; position: fixed; top: 0; height: 100vh;
+            width: __STRIP__; z-index: 999997; background: __PANEL_BG__; cursor: pointer;
+            flex-direction: column; align-items: center; gap: 0.45rem;
+            padding-top: 0.45rem; user-select: none; color: __TX__; }
+          #chartsStrip { right: 0; border-left: 1px solid rgba(128,128,128,0.25); }
+          #sbStrip { left: 0; border-right: 1px solid rgba(128,128,128,0.25); }
+          html[data-charts-collapsed] #chartsStrip { display: flex; }
+          html[data-sb-collapsed] #sbStrip { display: flex; }
+          #chartsStrip:hover, #sbStrip:hover { background: rgba(76,141,255,0.14); }
+          .d050-arr { font-size: 1.5rem; line-height: 1.1; opacity: 0.6; }
+          .d050-lbl { writing-mode: vertical-rl; text-orientation: upright;
+            font-size: 0.68rem; letter-spacing: 0.28em; opacity: 0.55; }
+          #chartsStrip:hover .d050-arr, #chartsStrip:hover .d050-lbl,
+          #sbStrip:hover .d050-arr, #sbStrip:hover .d050-lbl
+            { opacity: 1; color: #4c8dff; }
+
+          /* the collapse controls: » at the chart panel's top-left, « at the parameter
+             panel's top-right — same 1.5rem glyph, same hit area, hover-revealed, mirror
+             images of each other (D-050) */
+          #chartsClose, #sbClose { position: fixed; top: 0.35rem; z-index: 999996;
+            font-size: 1.5rem; line-height: 1; min-height: 2rem;
+            padding: 0.2rem 0.4rem; cursor: pointer; opacity: 0; color: __TX__;
+            transition: opacity 0.15s; }
+          #chartsClose { right: calc(var(--charts-w) - 2.7rem); }
+          #sbClose { left: calc(var(--sb-w) - 2.7rem); }
+          html[data-charts-hover] #chartsClose { opacity: 0.6; }
+          html[data-sb-hover] #sbClose { opacity: 0.6; }
+          #chartsClose:hover, #sbClose:hover { opacity: 1 !important; color: #4c8dff; }
+          html[data-charts-collapsed] #chartsClose { display: none; }
+          html[data-sb-collapsed] #sbClose { display: none; }
+
+          /* the native collapsed-sidebar control never shows (our strip replaces it); pad
+             the main area so content never slides under the strip */
+          [data-testid="stSidebarCollapsedControl"],
+          [data-testid="stExpandSidebarButton"] { display: none !important; }
+          html[data-sb-collapsed] [data-testid="stMain"] { padding-left: __STRIP__; }
 
           /* the ⓘ on the equation cards: same glyph idiom as the sidebar rows */
           [class*="st-key-ieq_"] button
@@ -286,12 +701,126 @@ def inject_layout_css():
               line-height: 1.2; font-size: 0.85rem; opacity: 0.65; }
           section[data-testid="stSidebar"] [class*="st-key-row_"] button:hover
             { opacity: 1; color: #4c8dff; }
+
+          /* ---- D-051 graph-height: the shim sets --chart-h (clamp of panel-width × aspect and
+             the vertical fill); the responsive (autosize, height="stretch") plotly charts fill a
+             container pinned to it, so the two stacked charts occupy most of the panel and re-fit
+             to the panel width. CSS-driven (not per-chart relayout) → survives the background
+             MC-accumulation reruns. */
+          :root { --chart-h: 300px; }
+          .st-key-chartscol [data-testid="stPlotlyChart"] { height: var(--chart-h) !important; }
+
+          /* ================= D-051 responsive modes (data-app-mode = wide|narrow|phone) =========
+             WIDE is the untouched three-column layout. NARROW: the fixed charts column can't dock
+             beside the middle, so it hides and the injected 'Graphs' tab overlays the SAME
+             always-mounted column over the middle (single MC mount preserved — only CSS toggles). */
+          /* the injected Graphs tab: hidden in wide, a segmented-style pill in narrow/phone */
+          #graphsTab { display: none !important; }
+          html[data-app-mode="narrow"] #graphsTab,
+          html[data-app-mode="phone"]  #graphsTab { display: inline-flex !important;
+            align-items: center; margin-left: 6px; cursor: pointer; }
+          html[data-graphs-open="1"] #graphsTab { color: #4c8dff; }
+          /* the overlay's close × (body-level), only while the charts overlay is showing */
+          #graphsClose { display: none; position: fixed; top: 4.2rem; right: 0.6rem; z-index: 121;
+            font-size: 1.7rem; line-height: 1; cursor: pointer; color: __TX__;
+            background: __PANEL_BG__; border-radius: 8px; padding: 0 0.55rem; }
+          html[data-app-mode="narrow"][data-graphs-open="1"] #graphsClose,
+          html[data-app-mode="phone"][data-graphs-open="1"]  #graphsClose { display: block; }
+          #graphsClose:hover { color: #4c8dff; }
+
+          /* narrow/phone: suppress the wide charts drag controls; the middle, its spacer column
+             and the top strip take the full width (the fixed column is out of flow) */
+          html[data-app-mode="narrow"] #chartsDivider, html[data-app-mode="phone"] #chartsDivider,
+          html[data-app-mode="narrow"] #chartsStrip,  html[data-app-mode="phone"] #chartsStrip,
+          html[data-app-mode="narrow"] #chartsClose,  html[data-app-mode="phone"] #chartsClose
+            { display: none !important; }
+          html[data-app-mode="narrow"] .st-key-chartscol,
+          html[data-app-mode="phone"]  .st-key-chartscol { display: none; }
+          html[data-app-mode="narrow"] [data-testid="stColumn"]:has(.st-key-chartscol),
+          html[data-app-mode="phone"]  [data-testid="stColumn"]:has(.st-key-chartscol)
+            { flex: 0 0 0 !important; min-width: 0 !important; }
+          html[data-app-mode="narrow"] [data-testid="stLayoutWrapper"]:has(> .st-key-topbar),
+          html[data-app-mode="phone"]  [data-testid="stLayoutWrapper"]:has(> .st-key-topbar),
+          html[data-app-mode="narrow"] [data-testid="stLayoutWrapper"]:has(> .st-key-apptitle),
+          html[data-app-mode="phone"]  [data-testid="stLayoutWrapper"]:has(> .st-key-apptitle)
+            { width: 100% !important; }
+          /* page heading: compact in phone; footer spans the full width when the charts column
+             is out of flow (narrow) or the sidebar is a drawer (phone) */
+          html[data-app-mode="phone"] .st-key-apptitle .apptitle-main { font-size: 1.3rem; }
+          html[data-app-mode="phone"] .st-key-apptitle .apptitle-sub { font-size: 0.85rem; }
+          html[data-app-mode="narrow"] .st-key-appfooter
+            { width: calc(100% - var(--sb-w)); }
+          html[data-app-mode="phone"] .st-key-appfooter { left: 0; width: 100%; }
+          html[data-app-mode="narrow"] header[data-testid="stHeader"],
+          html[data-app-mode="phone"]  header[data-testid="stHeader"] { right: 0 !important; }
+
+          /* charts OVERLAY (Graphs tab active): the same fixed column, spanning from the sidebar's
+             right edge to the window edge, below the top bar, above the middle content. */
+          html[data-app-mode="narrow"][data-graphs-open="1"] .st-key-chartscol {
+            display: block; left: var(--sb-w); right: 0; width: auto; top: 6.5rem;
+            height: calc(100vh - 6.5rem); z-index: 120; padding-top: 1rem; }
+
+          /* ---- PHONE: single column. The parameter sidebar becomes an off-canvas drawer slid in
+             by the injected ☰ button; the charts overlay (Graphs tab) spans the full width. ---- */
+          #sbDrawerBtn { display: none; position: fixed; top: 0.5rem; left: 0.5rem; z-index: 135;
+            font-size: 1.5rem; line-height: 1; cursor: pointer; color: __TX__;
+            background: __PANEL_BG__; border-radius: 8px; padding: 0.1rem 0.55rem; }
+          html[data-app-mode="phone"] #sbDrawerBtn { display: block; }
+          html[data-app-mode="phone"] section[data-testid="stSidebar"] {
+            position: fixed !important; top: 0; left: 0; height: 100vh !important; z-index: 130;
+            width: min(310px, 86vw) !important; min-width: 0 !important; max-width: 86vw !important;
+            transform: translateX(-102%); transition: transform 0.2s;
+            background: __PANEL_BG__; overflow: hidden; }
+          /* the inner content div is imposed to --sb-w by D-050; in the drawer it must match the
+             (narrower) drawer width so no row spills past the panel edge */
+          html[data-app-mode="phone"] section[data-testid="stSidebar"] > div:first-child
+            { width: 100% !important; }
+          html[data-app-mode="phone"][data-sb-drawer="1"] section[data-testid="stSidebar"] {
+            transform: none; box-shadow: 8px 0 30px rgba(0,0,0,0.5); }
+          /* tap-outside scrim (also lets a tap close the drawer) */
+          #sbScrim { display: none; position: fixed; inset: 0; z-index: 129;
+            background: rgba(0,0,0,0.45); }
+          html[data-app-mode="phone"][data-sb-drawer="1"] #sbScrim { display: block; }
+          html[data-app-mode="phone"] [data-testid="stMainBlockContainer"]
+            { padding-left: 1rem !important; padding-top: 3rem !important; }
+          /* the D-050 sidebar drag/collapse controls are replaced by the ☰ drawer on phone */
+          html[data-app-mode="phone"] #sbDivider,
+          html[data-app-mode="phone"] #sbClose,
+          html[data-app-mode="phone"] #sbStrip { display: none !important; }
+          html[data-app-mode="phone"][data-graphs-open="1"] .st-key-chartscol {
+            display: block; left: 0; right: 0; width: auto; top: 6.5rem;
+            height: calc(100vh - 6.5rem); z-index: 120; padding-top: 1rem; }
+
+          /* the polite portrait 'rotate to landscape' suggestion (body-level, gated by data-rotate) */
+          #rotateOverlay { display: none; position: fixed; inset: 0; z-index: 200;
+            background: __TOPBAR_BG__; flex-direction: column; align-items: center;
+            justify-content: center; text-align: center; gap: 1rem; padding: 2rem; }
+          html[data-rotate="1"] #rotateOverlay { display: flex; }
+          #rotateOverlay .rot-ic { font-size: 2.6rem; }
+          #rotateOverlay .rot-h { font-size: 1.05rem; font-weight: 600; color: __TX__; }
+          #rotateOverlay .rot-p { font-size: 0.9rem; color: __TX__; opacity: 0.7; max-width: 26ch; }
+          #rotateOverlay a { color: #4c8dff; cursor: pointer; text-decoration: underline;
+            font-size: 0.9rem; }
         </style>
         """
-    st.markdown(css.replace("__TOPBAR_BG__", topbar_bg)
-                   .replace("__PANEL_BG__", panel_bg)
-                   .replace("__HEADER_RIGHT__", header_right)
-                   .replace("__TOPBAR_MR__", topbar_mr), unsafe_allow_html=True)
+    return (css.replace("__TOPBAR_BG__", topbar_bg)
+               .replace("__PANEL_BG__", panel_bg)
+               .replace("__TX__", text_col)
+               .replace("__PANEL_W__", f"{PANEL_W_PX}px")
+               .replace("__GUTTER__", f"{PANEL_GUTTER_PX}px")
+               .replace("__STRIP__", f"{PANEL_STRIP_PX}px"))
+
+
+def inject_layout_css():
+    """Phase-2 layout (D-043, variant A2 + D-050 drag-collapse panels): the sticky top bar,
+    the fixed-width docked calibration panel and folded-pane strip columns (Streamlit columns
+    are proportional, so the fixed widths are imposed on the column that CONTAINS the keyed
+    container), the compact sidebar row rhythm, and the D-050 injected panel controls."""
+    try:
+        _light = getattr(st.context.theme, "type", None) == "light"
+    except Exception:
+        _light = False
+    st.markdown(_layout_css(_light), unsafe_allow_html=True)
 
 
 def inject_cal_emphasis_css(row_keys):

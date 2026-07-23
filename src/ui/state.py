@@ -50,20 +50,9 @@ def close_cal():
     st.session_state.pop("_cal_scrolled", None)   # re-arm the panel's one-shot autoscroll
 
 
-# ---- collapsible right chart panel (D-047) --------------------------------------------------
-def charts_open():
-    """True while the right chart panel is expanded (default). Collapsed, its width flows to
-    the flexible middle pane; the MC finance component stays mounted hidden so the background
-    accumulation keeps ticking."""
-    return bool(st.session_state.get("_charts_open", True))
-
-
-def open_charts():
-    st.session_state["_charts_open"] = True
-
-
-def close_charts():
-    st.session_state["_charts_open"] = False
+# (the right chart panel's collapse/width moved CLIENT-side in D-050 — theme.inject_frontend_js
+# owns it via localStorage + a root CSS variable, so no server state exists for it anymore; the
+# panel column itself renders every run and the MC component stays mounted by construction)
 
 
 # ---- equations click-to-highlight (D-048) ---------------------------------------------------

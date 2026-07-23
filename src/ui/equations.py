@@ -1,6 +1,7 @@
-"""The equations-&-calibration panel (one collapsible subsection per model block, with
-the changed-at-this-level tag riding in the expander label for targeted remounts) and the
-base-model profitability race (levels 1–4).
+"""The equations-&-calibration panel (one collapsible subsection per model block) and the
+base-model profitability race (levels 1–4). D-050: no "new/changed at this level" TEXT marks
+anywhere — the concise view already shows only the level's own subsection, and the show-all
+view marks it with a subtle border/tint on the expander header instead.
 """
 import streamlit as st
 
@@ -76,9 +77,8 @@ def _profit_condition(level, dd):
 
 
 # Per-subsection equation panel. Each level changes exactly ONE subsection (or adds Extensions at
-# L8); the change-tag rides in the EXPANDER LABEL so Streamlit remounts just that subsection at the
-# level it changes (applying the expanded= default), while every other subsection keeps the user's
-# manual open/closed state across level switches (stable label -> stable widget identity).
+# L8); labels stay STABLE across level switches, so every subsection keeps the user's manual
+# open/closed state (stable label -> stable widget identity).
 _SUB_ORDER = ["leader_compute", "leader_algo", "follower", "value", "revenue", "cost",
               "profit", "extensions"]
 _SUB_LABEL = {"leader_compute": "Leader compute  ċᴸ",
@@ -192,11 +192,7 @@ def equations_panel(level, dd, p):
                          "level** is shown (and the left panel narrows to its parameters). "
                          "Ticked: every subsection of the model so far, expanded.")
 
-    def eq(gloss, latex, tag=None):
-        if tag == "new":
-            gloss += "  :green[● new at this level]"
-        elif tag == "changed":
-            gloss += "  :orange[● changed at this level]"
+    def eq(gloss, latex):
         st.caption(gloss)
         st.latex(latex)
 
@@ -212,8 +208,7 @@ def equations_panel(level, dd, p):
                 else:
                     eq("Compute growth decays from **today's** rate $g_{c0}$ (the constant $g_c$ "
                        "of the levels below) toward a long-run floor $g_{c\\infty}$.",
-                       r"\dot c^L = g_c(t) = g_{c\infty} + (g_{c0}-g_{c\infty})e^{-\xi t}",
-                       tag="changed" if level == 4 else None)
+                       r"\dot c^L = g_c(t) = g_{c\infty} + (g_{c0}-g_{c\infty})e^{-\xi t}")
             _cal_cards(right, subsection_param_entries("leader_compute", level), dd, p)
         elif sub_id == "leader_algo":
             with left:
@@ -233,8 +228,7 @@ def equations_panel(level, dd, p):
                        "experiment compute — whose ratio is 1 while compute growth is constant "
                        "(it starts moving at Level 4).",
                        r"\dot a^L = g_a\left[(1-\alpha)\tfrac{\psi(x^L)}{\psi(0)} "
-                       r"+ \alpha\right],\quad \psi(x)=1+\rho_0 e^{\gamma x}",
-                       tag="changed")
+                       r"+ \alpha\right],\quad \psi(x)=1+\rho_0 e^{\gamma x}")
                 else:
                     eq("The base model's constant $g_a$ now responds to research inputs: a weighted "
                        "average ($\\eta=1$) of the AI-assistance feedback $\\psi$ and experiment "
@@ -244,8 +238,7 @@ def equations_panel(level, dd, p):
                 if level >= 3:
                     eq("ψ-share: the fraction of algo progress from the $\\psi$ feedback (past ~25% "
                        "it is no longer a small correction).",
-                       r"\psi\text{-share} = 1 - \dot a^L\big|_{\psi\ \text{frozen}} \big/ \dot a^L",
-                       tag="new" if level == 3 else None)
+                       r"\psi\text{-share} = 1 - \dot a^L\big|_{\psi\ \text{frozen}} \big/ \dot a^L")
             _cal_cards(right, subsection_param_entries("leader_algo", level), dd, p)
         elif sub_id == "follower":
             with left:
@@ -261,14 +254,11 @@ def equations_panel(level, dd, p):
                        "distillation $\\delta_{rel}$ from the served model (off where the follower "
                        "is already ahead); the **capability gap** is $\\Delta = x^L - x^F$."
                        + ("" if level >= 7 else " Here the leader serves its newest model."),
-                       rf"\dot a^F = g_a^F + \delta_{{dev}}(a^L - a^F) + \delta_{{rel}}\max({srv} - x^F,\,0)",
-                       tag="changed" if level == 6 else None)
+                       rf"\dot a^F = g_a^F + \delta_{{dev}}(a^L - a^F) + \delta_{{rel}}\max({srv} - x^F,\,0)")
                     eq("Follower compute growth — its own decaying family (introduced here).",
-                       r"\dot c^F = g_c^F(t) = g_{c\infty}^F + (g_{c0}^F-g_{c\infty}^F)e^{-\xi^F t}",
-                       tag="new" if level == 6 else None)
+                       r"\dot c^F = g_c^F(t) = g_{c\infty}^F + (g_{c0}^F-g_{c\infty}^F)e^{-\xi^F t}")
                     eq("The initial gap $\\Delta_0$ splits between algo and compute.",
-                       r"a^F(0) = -\text{split}\cdot\Delta_0, \qquad c^F(0) = -(1-\text{split})\Delta_0",
-                       tag="new" if level == 6 else None)
+                       r"a^F(0) = -\text{split}\cdot\Delta_0, \qquad c^F(0) = -(1-\text{split})\Delta_0")
             if level <= 5:
                 _cal_delta_merged(right, dd, p)
             else:
@@ -282,8 +272,7 @@ def equations_panel(level, dd, p):
                 else:
                     eq("Dollar value — logistic: exponential, then saturating past $x_{mid}$; "
                        "anchored so $W(0) = W_0$.",
-                       r"W(x) = \frac{W_{\max}}{1 + 10^{-\nu (x - x_{mid})}}, \qquad W(0) = W_0",
-                       tag="changed" if level == 5 else None)
+                       r"W(x) = \frac{W_{\max}}{1 + 10^{-\nu (x - x_{mid})}}, \qquad W(0) = W_0")
             _cal_cards(right, subsection_param_entries("value", level), dd, p)
         elif sub_id == "revenue":
             with left:
@@ -291,14 +280,12 @@ def equations_panel(level, dd, p):
                     eq("The leader serves the model it had $\\tau$ ago (time-varying $\\tau(t)$ "
                        "gives the window scenarios); $\\tau = 0$ means the served model equals the "
                        "developed one.",
-                       r"x^R_t = x^L_{t-\tau}",
-                       tag="new" if level == 7 else None)
+                       r"x^R_t = x^L_{t-\tau}")
                 served = "x^R" if level >= 7 else "x^L"
                 _on = "the *served* model" if level >= 7 else "the leader's model"
                 eq(f"Revenue = margin $\\theta$ times the value gap it can charge for — earned on "
                    f"{_on}.",
-                   rf"\text{{revenue}} = \theta\,\big[\,W({served}) - W(x^F)\,\big]",
-                   tag="changed" if level == 7 else None)
+                   rf"\text{{revenue}} = \theta\,\big[\,W({served}) - W(x^F)\,\big]")
             _cal_cards(right, subsection_param_entries("revenue", level), dd, p)
         elif sub_id == "cost":
             with left:
@@ -306,16 +293,14 @@ def equations_panel(level, dd, p):
                     eq("The training bill = compute path marked up by the R&D overhead "
                        "$\\phi_{RD}$: pay now for the model shipping $\\ell$ ahead, at prices "
                        "falling at $g_p$.",
-                       r"\text{cost}(t) = (1+\phi_{RD})\,S_0\,10^{\,c^L(t+\ell) - c^L(0)}\,10^{-g_p t}",
-                       tag="changed" if level == 8 else None)
+                       r"\text{cost}(t) = (1+\phi_{RD})\,S_0\,10^{\,c^L(t+\ell) - c^L(0)}\,10^{-g_p t}")
                 elif level >= 2:
                     eq("Training in advance: the firm pays now for the compute of the model "
                        "shipping $\\ell$ ahead, at prices falling at $g_p$ — today's bill jumps to "
                        f"$10^{{\\,{_gc_sym()}\\ell}}\\times$ the current model's "
                        f"(≈ {10.0 ** (dd['g_C0'] * dd['ell']):.2f}× at $\\ell = $ "
                        f"{dd['ell']:.2f}).",
-                       r"\text{cost}(t) = S_0\,10^{\,c^L(t+\ell) - c^L(0)}\,10^{-g_p t}",
-                       tag="changed" if level == 2 else None)
+                       r"\text{cost}(t) = S_0\,10^{\,c^L(t+\ell) - c^L(0)}\,10^{-g_p t}")
                 else:
                     eq("The training bill: the compute of the model the leader is **running right "
                        "now** ($\\ell = 0$), at prices falling at $g_p$ — so cost today is exactly "
@@ -355,7 +340,7 @@ def equations_panel(level, dd, p):
                                "profit.", r"\Pi \to \Pi - L_0\,e^{g_w t}"))
             if active:
                 for g, l in active:
-                    eq(g, l, tag="new")
+                    eq(g, l)
             else:
                 st.caption("All extension dials (II.2, II.4–II.7) are off — turn one on in the "
                            "sidebar and its equation appears here.")
@@ -367,9 +352,10 @@ def equations_panel(level, dd, p):
         st.caption(f"**{len(existing) - len(shown)} unchanged subsections hidden** — they "
                    "carry over from the levels below (tick **show all equations** for the "
                    "full model).")
-    # D-048: the changed subsection is marked VISUALLY (accent left border + subtle header
-    # tint, both themes) instead of the old "· ● changed at this level" label text
-    if changed_here in shown:
+    # D-048/D-050: in the SHOW-ALL view the level's own subsection is marked VISUALLY (accent
+    # left border + subtle header tint, both themes) — never with label text. The concise view
+    # carries no marking at all: it already shows only that subsection.
+    if changed_here in shown and len(shown) > 1:
         st.markdown(
             f"<style>.st-key-eqsub_{changed_here} [data-testid='stExpander'] summary "
             "{ border-left: 3px solid #4c8dff; background: rgba(76,141,255,0.10); }"

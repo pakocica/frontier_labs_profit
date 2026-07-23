@@ -23,11 +23,13 @@ from ui.model_access import m  # noqa: E402
 
 theme.inject_base_css()
 theme.inject_layout_css()
+theme.inject_frontend_js()  # D-049/D-050: level-selector shim + panel drag-collapse (every run)
 
 LEVEL = state.level()
 if state.mc_active():
     theme.inject_mc_slider_css()
 
+topbar.render_title()   # page heading, above the sticky top strip (D-051)
 topbar.render()
 d = sidebar.render(LEVEL)
 
@@ -37,3 +39,4 @@ p = m.Params(**d)
 hl = m.headline(sim, p)
 
 views.render_main(d, items, sim, hl, p, LEVEL)
+topbar.render_footer()   # quiet author attribution at the bottom of the middle pane (D-051)
