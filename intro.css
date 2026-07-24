@@ -1,11 +1,17 @@
 /* ============================================================================
-   intro.css — LAPTOP intro-tour overlay (D-058).
+   intro.css — LAPTOP intro-tour overlay (D-058; recomposed as a centred card, D-070).
 
-   Chrome for the full-screen overlay that shows the shared tour deck ON TOP of
-   the widget while it boots (the widget is blurred/shaded behind). The DECK
-   itself (slides, navigator, tokens) is styled by tour.css — this file only
-   styles the overlay backdrop, the always-present ×, and the bottom boot→ready
-   button. Theme-aware via tour.css tokens.
+   Chrome for the overlay that shows the shared tour deck ON TOP of the widget
+   while it boots (the widget is blurred/shaded behind). On the laptop the deck
+   is presented as a NARROW, CENTRED CARD floated over the blurred widget — not
+   a full-viewport column (which read as a stretched phone on a wide screen).
+   The DECK itself (slides, navigator, tokens) is styled by tour.css; this file
+   styles only the backdrop, the card frame, the always-present ×, and the
+   boot→ready button.
+
+   Every rule here is scoped under #intro, which exists ONLY in this laptop
+   overlay — the phone page (mobile.html) mounts the same deck into #phone — so
+   nothing here can touch the phone layout. Theme-aware via tour.css tokens.
 
    States are driven by attributes set by intro.js:
      #intro[data-mode="full"|"min"]   full deck (first visit) vs minimal card (return)
@@ -15,19 +21,21 @@
 
 /* blur + shade the widget behind the overlay (loaded or still booting) */
 html[data-tour-open] #root {
-  filter: blur(7px) saturate(.92);
-  transform: scale(1.012);
+  filter: blur(8px) saturate(.9);
+  transform: scale(1.015);
   pointer-events: none;
   transition: filter .35s ease, transform .35s ease;
 }
 
 /* ---------------------------------------------------------------- overlay -- */
+/* the backdrop: a soft shaded field that lets the blurred widget read through,
+   with the reading card floated in its centre (both axes) */
 #intro.tour-overlay {
   position: fixed; inset: 0; z-index: 1000000;
-  display: flex; flex-direction: column;
-  /* a strong scrim so the deck is fully legible; the widget shows through faintly */
-  background: color-mix(in srgb, var(--bg, #0e1117) 90%, transparent);
-  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--bg, #0e1117) 62%, transparent);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
   color: var(--ink, #e6e6df);
   font-family: var(--sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
   overflow: hidden;
@@ -37,46 +45,88 @@ html[data-tour-open] #root {
 @keyframes tour-in  { from { opacity: 0; } to { opacity: 1; } }
 @keyframes tour-out { from { opacity: 1; } to { opacity: 0; } }
 
-/* always-present close — the tour is optional, never a gate */
+/* ------------------------------------------------------------------- card -- */
+/* the contained reading panel: narrow, portrait, lifted off the blurred widget
+   by a hairline border + layered shadow + a faint top highlight (instrument-
+   panel feel). Holds the deck body and the boot bar as one object. */
+#intro .tour-card {
+  position: relative;
+  display: flex; flex-direction: column;
+  width: min(500px, 100%);
+  height: min(680px, 100%);
+  background: var(--surface, #161b22);
+  border: 1px solid var(--line, rgba(139,152,166,.16));
+  border-radius: 22px; overflow: hidden;
+  box-shadow:
+    0 34px 84px -30px rgba(0, 0, 0, .74),
+    0 10px 30px -14px rgba(0, 0, 0, .5),
+    inset 0 1px 0 color-mix(in srgb, var(--ink, #e6e6df) 8%, transparent);
+  animation: card-in .42s cubic-bezier(.2, .7, .2, 1) both;
+}
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(12px) scale(.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* always-present close — anchored to the card's own corner, not the viewport */
 #intro .tour-x {
-  position: absolute; top: 14px; right: 16px; z-index: 12;
-  width: 40px; height: 40px; border-radius: 999px;
-  display: grid; place-items: center; font-size: 24px; line-height: 1;
-  background: var(--surface, #161b22); border: 1px solid var(--line, rgba(139,152,166,.16));
+  position: absolute; top: 12px; right: 12px; z-index: 12;
+  width: 34px; height: 34px; border-radius: 999px;
+  display: grid; place-items: center; font-size: 21px; line-height: 1;
+  background: color-mix(in srgb, var(--surface-2, #1c232d) 78%, transparent);
+  border: 1px solid var(--line, rgba(139, 152, 166, .16));
   color: var(--muted, #8b98a6); cursor: pointer;
-  transition: color .15s, border-color .15s, transform .15s;
+  transition: color .15s, border-color .15s, background .15s, transform .15s;
 }
-#intro .tour-x:hover { color: var(--ink, #e6edf3); border-color: var(--accent, #4c8dff); transform: scale(1.06); }
-
-/* the deck fills the stage; its navigator pins to the stage's bottom */
-#intro .tour-stage {
-  position: relative; flex: 1 1 auto; min-height: 0;
-  width: min(680px, 100%); margin: 0 auto;
+#intro .tour-x:hover {
+  color: var(--ink, #e6edf3); border-color: var(--accent, #4c8dff);
+  background: var(--surface-2, #1c232d); transform: scale(1.06);
 }
-#intro .tour-deck { position: absolute; inset: 0; }
 
-/* minimal (return-visit) card: a single centered cover slide, no navigator */
-#intro[data-mode="min"] .tour-stage { width: min(560px, 100%); }
-#intro[data-mode="min"] .slide { justify-content: center; }
+/* the deck fills the card body; its navigator pins to the body's bottom */
+#intro .tour-stage { position: relative; flex: 1 1 auto; min-height: 0; width: 100%; }
+#intro .tour-deck  { position: absolute; inset: 0; }
+
+/* the laptop host (index.html) has no global box-sizing reset the way the phone
+   page does, so the deck's slides would render content-box — flex-basis:100% +
+   padding overflowing the card and clipping text. Scope a border-box reset to
+   the overlay's deck (a no-op on the phone, which is already border-box). */
+#intro .flp-deck, #intro .flp-deck *,
+#intro .flp-deck *::before, #intro .flp-deck *::after { box-sizing: border-box; }
+
+/* deck fit to the narrower desktop column (all scoped to the laptop overlay) */
+#intro .slide      { padding: 42px 36px 92px; }   /* bottom clears the pinned navigator */
+#intro .slide-top  { padding-right: 30px; }        /* keep the eyebrow rule clear of the × */
+#intro .nav        { background: linear-gradient(to top, var(--surface, #161b22) 48%, transparent); }
+/* in the shorter desktop card, centre the cover/outro instead of bottom-packing
+   them (bottom-packing collided the long gloss with the navigator) */
+#intro .slide[data-kind="cover"] .slide-body,
+#intro .slide[data-kind="outro"] .slide-body { justify-content: safe center; }
+
+/* minimal (return-visit) card: a single centred cover slide, shorter panel */
+#intro[data-mode="min"] .tour-card  { height: min(600px, 100%); }
+#intro[data-mode="min"] .slide      { justify-content: center; }
 #intro[data-mode="min"] .slide-body { justify-content: safe center; }
 
 /* ------------------------------------------------------- bottom boot bar -- */
+/* the card's footer: the loading→ready action, seamless with the card surface */
 #intro .tour-cta {
   flex: 0 0 auto; z-index: 11;
-  display: flex; flex-direction: column; align-items: center; gap: 8px;
-  padding: 16px 20px calc(22px + env(safe-area-inset-bottom, 0px));
-  background: linear-gradient(to top, var(--bg, #0e1117) 55%, transparent);
+  display: flex; flex-direction: column; align-items: center; gap: 7px;
+  padding: 14px 22px 18px;
+  background: var(--surface, #161b22);
+  border-top: 1px solid var(--line, rgba(139, 152, 166, .12));
 }
 #intro .tour-go {
   display: inline-flex; align-items: center; justify-content: center; gap: 10px;
-  min-width: 300px; padding: 14px 26px; border-radius: 999px;
-  font-size: 15px; font-weight: 650; letter-spacing: .01em;
-  border: 1px solid var(--line, rgba(139,152,166,.16));
-  background: var(--surface, #161b22); color: var(--muted, #8b98a6);
+  width: 100%; max-width: 320px; padding: 13px 24px; border-radius: 999px;
+  font-size: 14.5px; font-weight: 650; letter-spacing: .01em;
+  border: 1px solid var(--line, rgba(139, 152, 166, .16));
+  background: var(--surface-2, #1c232d); color: var(--muted, #8b98a6);
   cursor: default; transition: background .3s, color .3s, border-color .3s, box-shadow .3s;
 }
 #intro .tour-sub {
-  font-size: 12.5px; color: var(--muted, #8b98a6); min-height: 1em;
+  font-size: 12px; color: var(--muted, #8b98a6); min-height: 1em;
   font-family: var(--mono, ui-monospace, Menlo, monospace); letter-spacing: .02em;
 }
 
@@ -111,7 +161,7 @@ html[data-tour-open] #root {
 #intro[data-ready="1"].tour-overlay { cursor: default; }
 
 @media (prefers-reduced-motion: reduce) {
-  #intro.tour-overlay, #intro.tour-overlay.i-gone,
+  #intro.tour-overlay, #intro.tour-overlay.i-gone, #intro .tour-card,
   #intro[data-ready="1"] .tour-go { animation: none; }
   #intro .tour-go .tour-spin { animation: none; }
   html[data-tour-open] #root { transition: none; }

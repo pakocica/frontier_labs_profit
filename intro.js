@@ -44,12 +44,16 @@
     el.className = "tour-overlay";
     el.setAttribute("data-mode", mode);
     el.setAttribute("data-ready", ready ? "1" : "0");
+    // one contained card holds the deck body + boot bar; the surrounding
+    // shaded field is the backdrop (dismiss target once ready)
     el.innerHTML =
-      '<button class="tour-x" type="button" aria-label="Close the introduction" title="Close">×</button>' +
-      '<div class="tour-stage"><div class="tour-deck"></div></div>' +
-      '<div class="tour-cta">' +
-        '<button class="tour-go" type="button"></button>' +
-        '<div class="tour-sub"></div>' +
+      '<div class="tour-card">' +
+        '<button class="tour-x" type="button" aria-label="Close the introduction" title="Close">×</button>' +
+        '<div class="tour-stage"><div class="tour-deck"></div></div>' +
+        '<div class="tour-cta">' +
+          '<button class="tour-go" type="button"></button>' +
+          '<div class="tour-sub"></div>' +
+        '</div>' +
       '</div>';
     root.setAttribute("data-tour-open", "1");
 
@@ -78,10 +82,10 @@
       if (ready) leave();                // muted / non-clickable until ready
     });
     // click-anywhere-on-the-backdrop → dismiss, but ONLY after ready, and never
-    // when the click lands on the deck content or a control
+    // when the click lands inside the card (deck, boot bar, or a control)
     el.addEventListener("click", function (e) {
       if (!ready) return;
-      if (e.target.closest(".tour-deck, .tour-go, .tour-x")) return;
+      if (e.target.closest(".tour-card")) return;
       leave();
     });
   }
@@ -96,9 +100,9 @@
       go.innerHTML = '<span class="tour-dot" aria-hidden="true"></span>Go to the widget &#8594;';
       if (sub) sub.textContent = "Ready — take your time.";
     } else {
-      go.innerHTML = '<span class="tour-spin" aria-hidden="true"></span>' +
-        "Preparing the widget… (~30–60s, runs in your browser)";
-      if (sub) sub.textContent = "";
+      // narrow card: keep the button label short, move the reassurance to the sub
+      go.innerHTML = '<span class="tour-spin" aria-hidden="true"></span>Preparing the widget…';
+      if (sub) sub.textContent = "~30–60 s · runs entirely in your browser";
     }
   }
 
