@@ -132,9 +132,20 @@
   }, 300);
 
   /* ---------------- (i) reopen hook (called from ui/theme.py's title-bar JS) ----------------
-     Reopens the FULL deck with the (now loaded) widget blurred behind. */
+     Reopens the FULL slideable deck with the (now loaded) widget blurred behind. Must work from
+     ANY state and be re-openable repeatedly (D-071). The old guard bailed whenever ANY #intro
+     existed — so a lingering/stale overlay (e.g. the inline boot-fallback #intro if FLPTour was
+     slow to load) turned the (i) into a permanent no-op. Now: if a LIVE full deck is already up,
+     no-op; otherwise tear down whatever's there and mount the full deck fresh. */
   window.__flpOpenTour = function () {
-    if (document.getElementById("intro")) return;   // already open
+    var existing = document.getElementById("intro");
+    if (existing) {
+      var liveFull = existing.getAttribute("data-mode") === "full" &&
+        existing.classList.contains("tour-overlay") && !existing.classList.contains("i-gone");
+      if (liveFull) { var tr = existing.querySelector(".track"); if (tr) try { tr.focus(); } catch (e) {} return; }
+      if (existing.parentNode) existing.parentNode.removeChild(existing);   // drop stale/min/fading overlay
+      gone = true;                                                          // let buildOverlay reset it
+    }
     var el = buildOverlay("full");
     if (el) { var t = el.querySelector(".track"); if (t) try { t.focus(); } catch (e) {} }
   };
@@ -144,6 +155,21 @@
     if (e.key === "Escape" && document.getElementById("intro")) leave();
   });
 
-  /* ---------------- first paint ---------------- */
-  buildOverlay(seen() ? "min" : "full");
+  /* arrow keys drive the deck from anywhere in the overlay, not only when the track is focused
+     (mirrors the phone page). Reuses the on-screen prev/next controls so nav stays single-sourced. */
+  window.addEventListener("keydown", function (e) {
+    var el = document.getElementById("intro");
+    if (!el || el.classList.contains("i-gone")) return;
+    if (e.target && e.target.closest && e.target.closest(".track")) return;   // deck handles its own focused keys
+    if (e.key === "ArrowRight") { var n = el.querySelector(".next"); if (n) { e.preventDefault(); n.click(); } }
+    else if (e.key === "ArrowLeft") { var p = el.querySelector(".prev"); if (p) { e.preventDefault(); p.click(); } }
+  });
+
+  /* ---------------- first paint ----------------
+     Always the FULL slideable deck — first visit AND return. The old return-visit "minimal" 1-slide
+     card (gated on flp_tour_seen) read as "just one page you can't slide over" and, because the (i)
+     lives BEHIND the overlay, left returning visitors with no path to the whole intro (D-071). The
+     deck is optional either way — the × / ready-button / backdrop dismiss it in one click. The "min"
+     mode remains available in buildOverlay() but is no longer auto-shown. */
+  buildOverlay("full");
 })();
