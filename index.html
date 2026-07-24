@@ -4,25 +4,22 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script>
-    /* (D-057) Phone routing — AUTHORIZED by Pavel ("This looks excellent. Please deploy it.",
-       2026-07-23, and again when he reported the redirect was missing on his phone). Send
-       small-screen touch visitors to the static introduction (mobile.html) BEFORE the ~30-60s
-       Pyodide download begins — the full explorer is built for a laptop. The intro's "open the
-       full explorer" link returns here with ?full=1, remembered for the session so it doesn't
-       bounce back. A coarse (touch) pointer is required, so a desktop browser in a short/narrow
-       window keeps the full app. Runs first in <head>, before any heavy asset loads. */
+    /* (D-057, gated D-072) Phone routing. A phone / small touch screen is ALWAYS guide-only:
+       send it to the static title landing (mobile.html) BEFORE the ~30–60s Pyodide download
+       begins. The interactive explorer (Pyodide widget + the tour deck) is a laptop/desktop
+       experience and overflows a narrow screen, so there is NO ?full / flp_full escape for a
+       coarse+small screen — that escape is exactly how a phone previously ended up loading the
+       broken-on-mobile app (Pavel's report). A coarse (touch) pointer is REQUIRED, so a desktop
+       / fine-pointer window in a short or narrow size is UNAFFECTED and keeps the full app
+       (incl. the D-064 horizontal scroll). Runs first in <head>, before any heavy asset loads. */
     (function () {
       try {
-        var qp = new URLSearchParams(location.search);
-        if (qp.get("full") === "1") { try { sessionStorage.setItem("flp_full", "1"); } catch (e) {} }
-        var full = qp.get("full") === "1" ||
-          (function () { try { return sessionStorage.getItem("flp_full") === "1"; } catch (e) { return false; } })();
         var coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
         var minInner = Math.min(window.innerWidth || 9999, window.innerHeight || 9999);
         var minScreen = (window.screen && screen.width && screen.height)
           ? Math.min(screen.width, screen.height) : 9999;
         var small = Math.min(minInner, minScreen) < 640;
-        if (coarse && small && !full) { location.replace("./mobile.html"); }
+        if (coarse && small) { location.replace("./mobile.html"); }
       } catch (e) {}
     })();
   </script>
@@ -57,7 +54,7 @@
       browser (Python via WebAssembly), nothing is sent to a server.</div>
   </div>
   <div id="root"></div>
-  <script src="./tour.js?v=1" defer></script>
+  <script src="./tour.js?v=2" defer></script>
   <script src="./intro.js?v=6" defer></script>
   <script type="module">
     import { mount } from "https://cdn.jsdelivr.net/npm/@stlite/browser@1.8.1/build/stlite.js";

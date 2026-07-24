@@ -106,9 +106,10 @@ window.FLPTour = (function () {
       eyebrow: "The full picture",
       title: "There's a lot more to explore",
       gloss: "The explorer layers more mechanisms on top of this basic model &mdash; AI-accelerated R&amp;D, the compute slowdown, value saturation, the follower's own engine &mdash; and lets you test which ones actually change the verdict.",
-      // phone: link back to the laptop app; laptop: you're already there — the
-      // overlay's own button does the leaving, so this is a quiet reassurance.
-      foot: 'Best on a laptop &mdash; <a href="./?full=1">open the full explorer</a>.',
+      // phone (D-073): the deck is the whole, TERMINAL phone experience — no widget to
+      // send to, so this is a plain signpost, not a link. laptop: you're already there —
+      // the overlay's own button does the leaving, so footLaptop is a quiet reassurance.
+      foot: "Open on a laptop for the interactive explorer.",
       footLaptop: "Close this intro whenever you like &mdash; the explorer is right behind it.",
       credit: "Independent work in progress by Pavel Kocourek &mdash;<br>developed during the CAIS Fellowship." }
   ];
