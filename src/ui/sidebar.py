@@ -24,10 +24,12 @@ def render(LEVEL):
     d = {}  # parameter dict passed to Params(**d)
     S = st.session_state
 
-    # ---- equation-driven parameter filter (D-048): by default only the parameters that
-    # appear in the currently visible equations subsections get a row; hidden rows fall back
-    # to their remembered spot values (sv_ shadows), so the effective dict d stays complete
-    # and MC ranges/modes survive. None = show all (Introduction tab, or the override below).
+    # ---- level parameter filter (D-065, was D-048): by default only the parameters NEW at this
+    # level get a row (the `_CHANGED_AT[level]` subsection). Independent of the pane tab and of
+    # "show all equations" — the "show all parameters" toggle below is the only widener. Hidden
+    # rows fall back to their remembered spot values (sv_ shadows), so the effective dict d stays
+    # complete and MC ranges/modes survive. None = show all params up to this level (L1, or the
+    # toggle-on override below).
     allowed = sidebar_filter_keys(LEVEL)
 
     def _vis(*keys):
@@ -82,16 +84,25 @@ def render(LEVEL):
         if sv is not None:
             sfrac = float(np.clip((float(sv) - env_lo) / (env_hi - env_lo), 0.0, 1.0)) * 100.0
             slab = (fmt % float(sv)) if fmt else f"{float(sv):g}"
-            # geometry (measured in-browser): the overlay's zero-height line sits ~5px above the
-            # track center-line; the bullet must match the real thumbs (12px, center ON the
-            # track), so label(12px)+gap(4px)+bullet-half(6px) puts the container at -17px
+            # geometry in REM so the marker tracks the slider's rem-based vertical rhythm AND thumb
+            # size across the whole font range: the root font is 18px on a wide desktop but is pinned
+            # to a 14px floor on a narrow/horizontally-scrolled one (D-064 keeps laptops in the wide
+            # layout at any width). The old FIXED-px values (top:-17px, 12px bullet, 4px gap, the
+            # container's -42px lift) were pixel-perfect only near ~16px and drifted with the font:
+            # measured bullet-vs-track offset was ~+4px (below) at 18px and ~-5px (above) at 14px —
+            # a sign-flipping ±5px error, and the 12px bullet overshot the ~10px thumb at 14px.
+            # Fitting those two points gives offset(f)=2.25·f-36.5 (zero at f≈16.2px), so expressing
+            # every px at base 16 (px→rem = px/16) makes the lift scale with the font like the
+            # slider does: residual offset ≈ 2.25·f-(36.5/16)·f ≈ -0.03·f → sub-pixel across 14-18px,
+            # no sign flip, and the 0.75rem bullet (10.5px@14 / 13.5px@18) tracks the thumb diameter.
+            # (Verified live at the 14px floor; the 18px end is derived from the fit — see D-065.)
             parts.append(
                 f"<div title='spot value {slab} — used by the deterministic paths' "
                 f"style='position:absolute;left:{sfrac:.1f}%;transform:translateX(-50%);"
-                f"top:-17px;opacity:0.30;text-align:center;pointer-events:auto;z-index:5;'>"
-                f"<div style='font-size:12px;color:#4c8dff;line-height:1;"
-                f"margin-bottom:4px;white-space:nowrap;'>{slab}</div>"
-                f"<div style='width:12px;height:12px;border-radius:50%;background:#4c8dff;"
+                f"top:-1.0625rem;opacity:0.30;text-align:center;pointer-events:auto;z-index:5;'>"
+                f"<div style='font-size:0.75rem;color:#4c8dff;line-height:1;"
+                f"margin-bottom:0.25rem;white-space:nowrap;'>{slab}</div>"
+                f"<div style='width:0.75rem;height:0.75rem;border-radius:50%;background:#4c8dff;"
                 f"margin:0 auto;'></div></div>")
         ins = _inspected_params()
         if ekey in ins:
@@ -99,11 +110,15 @@ def render(LEVEL):
             frac = float(np.clip((v - env_lo) / (env_hi - env_lo), 0.0, 1.0)) * 100.0
             parts.append(
                 f"<div title='inspected draw: {v:.3g}' style='position:absolute;left:{frac:.1f}%;"
-                f"top:-3px;height:16px;border-left:2px dashed {C_SAMPLE};opacity:0.9;"
+                f"top:-0.1875rem;height:1rem;border-left:2px dashed {C_SAMPLE};opacity:0.9;"
                 f"pointer-events:auto;z-index:6;'></div>")
         if parts:
+            # -2.625rem 8px 2.625rem 8px == the old -42px 8px 42px 8px in rem (base 16): the ±top/
+            # bottom stay equal-and-opposite so the overlay is layout-neutral (net 0 height), while
+            # the rem lift scales the pull with the font. Horizontal 8px insets stay px — the % track
+            # mapping is unaffected and measured aligned within ~1px at both font sizes.
             container.markdown(
-                "<div style='position:relative;height:0;margin:-42px 8px 42px 8px;"
+                "<div style='position:relative;height:0;margin:-2.625rem 8px 2.625rem 8px;"
                 "pointer-events:none;'>" + "".join(parts) + "</div>",
                 unsafe_allow_html=True)
 
@@ -244,17 +259,20 @@ def render(LEVEL):
     # The reset registry is rebuilt from scratch each run, so it always lists exactly the controls the
     # current level shows. (Clear BEFORE any keyed widget is created.)
     st.session_state["_wdefaults"] = {}
-    # D-048: unobtrusive override for the equation-driven filter (only shown while the filter
-    # is active, i.e. the Equations tab is up); a plain mem key preserves the preference
-    # across the widget's GC when the tab switches away.
+    # D-065: the widener for the level filter — ALWAYS shown (on every pane tab), default OFF.
+    # `allowed is None` now means "L1 (all params are new)", where there is nothing to widen, so
+    # the toggle is suppressed there only. A plain mem key preserves the preference across the
+    # widget's GC. Ticked → allowed = None → every parameter UP TO this level shows.
     if allowed is not None:
         _reg("w_all_params", bool(S.get("_all_params_mem", False)))
-        if st.sidebar.checkbox("show all parameters", key="w_all_params",
-                               help="The left panel is filtered to the parameters of the "
-                                    "equations currently shown in the middle pane. Tick to "
-                                    "see every parameter of this level instead."):
+        show_all_params = st.sidebar.checkbox(
+            "show all parameters", key="w_all_params",
+            help="By default the panel shows only the parameters **introduced at this level**. "
+                 "Tick to see every parameter up to this level (equal model — only the visible "
+                 "controls change).")
+        S["_all_params_mem"] = bool(show_all_params)
+        if show_all_params:
             allowed = None
-        S["_all_params_mem"] = allowed is None
     st.sidebar.button("↺ Reset all to defaults", use_container_width=True, on_click=_reset_all,
                       help="Return every visible control to its notebook default.")
 

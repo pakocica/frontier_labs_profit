@@ -154,15 +154,15 @@ def visible_subsections(level):
 
 
 def sidebar_filter_keys(level):
-    """The parameter keys whose sidebar rows should show under the equation-driven filter
-    (D-048): the parameters of the currently visible subsections. None = show ALL (the
-    middle tab is Introduction — no equations on screen to filter by)."""
-    if st.session_state.get("_pane_tab_mem", "Introduction") != "Equations":
+    """The parameter keys the sidebar shows BY DEFAULT (D-065): only the parameters NEW at this
+    level — i.e. those of the single subsection `_CHANGED_AT[level]` introduces. Independent of
+    the middle-pane tab AND of 'show all equations' (that toggle governs the equations pane only);
+    the 'show all parameters' sidebar toggle is the sole widener. None = show ALL params up to
+    this level (level 1: the whole base model is new, so nothing is filtered)."""
+    changed = _CHANGED_AT.get(level)
+    if changed is None:            # level 1 — every parameter is new
         return None
-    keys = set()
-    for sub_id in visible_subsections(level):
-        keys |= {k for k, _ in subsection_param_entries(sub_id, level)}
-    return keys
+    return {k for k, _ in subsection_param_entries(changed, level)}
 
 
 def equations_panel(level, dd, p):

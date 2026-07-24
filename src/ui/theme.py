@@ -1,8 +1,48 @@
 """Theme: the two-hue semantic palette (D-040), CSS injections, and plotly helpers.
 """
+import re
+import sys
+
 import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
+
+# ---- checked placeholder substitution (D-062) ------------------------------------------------
+# The CSS/JS injection blobs carry `__NAME__` placeholders that are baked in per-render. A missed
+# or renamed token would otherwise ship as a literal `__NAME__` into the stylesheet/script and, in
+# the worst case, white-screen the app — a SILENT failure. `_substitute` routes every replacement
+# through one single-pass `re.sub` (a replaced value can't be re-scanned) and then asserts that no
+# placeholder token survived, turning that silent failure into a loud one under test/dev.
+_PLACEHOLDER_RE = re.compile(r"__(\w+)__")
+# STRICT survivor probe: BOTH double-underscore delimiters required. This deliberately does NOT
+# match the runtime globals the shim writes to the parent realm (`__d050RO`, `__d050L`,
+# `__d050Applies`, `__eqHost`, `__flpOpenTour`) — they start with `__` but do NOT end with `__`,
+# so a loose `'__' in out` check would false-positive on them and a bad guard could white-screen
+# the app. `\w` (not `[A-Za-z0-9]`) so it also catches underscore-bodied token names like
+# `__PANEL_BG__`/`__TOPBAR_BG__`; the trailing `__` requirement still excludes the globals above.
+_SURVIVOR_RE = re.compile(r"__\w+__")
+
+
+def _substitute(text, mapping):
+    """Apply every `__NAME__ -> value` replacement from `mapping` in a single pass, then assert
+    no placeholder survived. Keys in `mapping` are the bare NAMEs (no delimiters).
+
+    The assertion RAISES only in test/dev; in the deployed stlite (Pyodide/emscripten) path an
+    uncaught exception inside the CSS/JS injection is worse than a cosmetic literal token, so
+    there it logs-and-passes instead of throwing."""
+    out = _PLACEHOLDER_RE.sub(lambda m: mapping.get(m.group(1), m.group(0)), text)
+    survivor = _SURVIVOR_RE.search(out)
+    if survivor:
+        msg = (f"theme injection: unsubstituted placeholder {survivor.group(0)!r} would ship "
+               "as a literal")
+        if sys.platform != "emscripten":          # pytest / local dev -> loud failure
+            raise AssertionError(msg)
+        try:                                       # deployed stlite -> never throw here
+            import logging
+            logging.getLogger(__name__).warning(msg)
+        except Exception:
+            pass
+    return out
 
 # ---- "two-hue semantic" palette (D-040): leader = BLUE family, follower = ORANGE family, on
 #      every chart (deterministic model paths AND the MC panels). Derived/diagnostic series are
@@ -191,6 +231,15 @@ PANEL_W_REM = round(PANEL_W_PX / FONT_BASE_PX, 3)    # 23.571 → 330px at the 1
 NARROW_BP_PX = 1100
 PHONE_BP_PX = 620
 
+# D-064: desktop/fine-pointer min-width floor. The narrow/phone collapse is now gated on an
+# actual COARSE (touch) pointer (see modeFor in the shim) — a laptop/desktop (fine pointer) ALWAYS
+# stays in the full wide three-column layout however narrow the window is dragged. To keep the
+# three panels usable rather than squeezing the middle to nothing, the app view container carries
+# a min-width; below it the app scrolls HORIZONTALLY (the body itself never breaks). The floor is
+# sized for the narrow-font regime (font at its 14px floor below ~1500px → sidebar ≈ charts ≈
+# 330px), leaving a comfortable middle: 330 (sidebar) + ~314 (charts spacer) + ~396 (middle).
+APP_MIN_W_PX = 1240
+
 
 # The D-050/D-049 shim. Runs INSIDE the component iframe against the same-origin parent DOM.
 # It normally executes once per page load (the host iframe stays mounted across reruns because
@@ -234,7 +283,12 @@ _D050_JS = r"""
        panel scrolls internally (overflow-y:auto), and using the viewport top made the fitted
        height GROW as you scrolled down (first.top shrank). This form is scroll-invariant. */
     var charts = col.querySelectorAll('[data-testid="stPlotlyChart"]');
-    var n = Math.max(1, charts.length);
+    /* (D-068) height cap for single-graph tabs: divide the vertical fill budget by AT LEAST 2, so
+       a lone-graph tab (Algo progress / Compute L4-5 / Value) matches the Financial tab's
+       per-graph height instead of ballooning to fill the whole panel (Pavel's height rule). The
+       :root --chart-h CSS default already divides by 2, so this keeps the shim consistent with it.
+       Multi-graph tabs are unaffected (charts.length >= 2 there). */
+    var n = Math.max(2, charts.length);
     var fill;
     if (charts.length) {
       var colRect = col.getBoundingClientRect();
@@ -289,14 +343,22 @@ _D050_JS = r"""
      (Only the FUNCTION declarations live here — hoisted; the executable wiring runs after the
      listener registry __d050L is (re)initialised further down.) */
   var graphsOpen = false, drawerOpen = false, dismissRotate = false;
-  /* (D-052) PHONE is decided by the SMALLER viewport dimension, so a phone stays 'phone' in
-     LANDSCAPE too (e.g. 844×390): single column + ☰ drawer + full-width Graphs overlay. The old
-     width-only rule put a landscape phone in 'narrow', where the 330px static sidebar ate half
-     the screen and the charts column was unreachable. Desktop-narrow windows are unaffected
-     (their height comfortably exceeds the phone breakpoint). */
-  function modeFor() { var W = w.innerWidth;
+  /* (D-064) the narrow/phone collapse is GATED on an actual COARSE (touch) POINTER — the same
+     signal the deploy layer uses to redirect real phones to the mobile page. A desktop/laptop
+     (fine pointer) ALWAYS stays in the full wide three-column layout, no matter how narrow the
+     window is dragged: it never enters narrow/phone and never shows the 'rotate to landscape'
+     overlay. A too-narrow desktop window scrolls HORIZONTALLY instead (the APP_MIN_W floor in the
+     layout CSS). This removes the flaky width-threshold mode-switching on desktop that made the
+     resize behaviour non-deterministic, and the erroneous landscape overlay on narrow laptops.
+     (D-052) For touch devices, PHONE is decided by the SMALLER viewport dimension so a phone stays
+     'phone' in LANDSCAPE too (e.g. 844×390): single column + ☰ drawer + full-width Graphs overlay;
+     a coarse-pointer tablet between the phone and narrow breakpoints still gets the 'narrow'
+     charts-overlay layout. */
+  function coarsePtr() { return !!(w.matchMedia && w.matchMedia('(pointer: coarse)').matches); }
+  function modeFor() {
+    if (!coarsePtr()) return 'wide';                 /* fine pointer (desktop/laptop): always wide */
     if (Math.min(w.innerWidth, w.innerHeight) < PHONE) return 'phone';
-    return W >= NARROW ? 'wide' : 'narrow'; }
+    return w.innerWidth >= NARROW ? 'wide' : 'narrow'; }
   function applyMode() {
     var m = modeFor();
     R.setAttribute('data-app-mode', m);
@@ -363,6 +425,19 @@ _D050_JS = r"""
         '<a id="rotateContinue">Continue anyway →</a>';
       d.body.appendChild(o);
       on(d.getElementById('rotateContinue'), 'click', function () { dismissRotate = true; applyMode(); });
+    }
+    /* (D-058) the ⓘ next to the page title reopens the intro-tour overlay (host page:
+       index.html + intro.js, which defines w.__flpOpenTour). Injected into the title bar,
+       re-added by the observer after reruns. On :8501 (no overlay host) the hook is absent,
+       so the click is a graceful no-op. */
+    var titleBar = d.querySelector('.st-key-apptitle');
+    if (titleBar && !d.getElementById('tourInfo')) {
+      var ib = d.createElement('button');
+      ib.id = 'tourInfo'; ib.type = 'button'; ib.textContent = 'ⓘ';   /* ⓘ */
+      ib.title = 'About this explorer — replay the introduction';
+      ib.setAttribute('aria-label', 'Replay the introduction');
+      on(ib, 'click', function () { if (w.__flpOpenTour) w.__flpOpenTour(); });
+      titleBar.appendChild(ib);
     }
   }
 
@@ -523,18 +598,19 @@ _D050_JS = r"""
 
 def _frontend_js_html():
     """The final shim markup with the geometry constants baked in (pure — testable)."""
-    return (_D050_JS
-            .replace("__SNAP__", str(PANEL_SNAP_PX))
-            .replace("__MIN__", str(PANEL_W_MIN_PX))
-            .replace("__MAX__", str(PANEL_W_MAX_PX))
-            .replace("__STRIP__", str(PANEL_STRIP_PX))
-            .replace("__DEF__", str(PANEL_W_PX))
-            .replace("__FBASE__", str(FONT_BASE_PX))
-            .replace("__FMAX__", str(FONT_MAX_PX))
-            .replace("__FCANVAS__", str(FONT_CANVAS_REM))
-            .replace("__PWREM__", str(PANEL_W_REM))
-            .replace("__NARROW__", str(NARROW_BP_PX))
-            .replace("__PHONE__", str(PHONE_BP_PX)))
+    return _substitute(_D050_JS, {
+        "SNAP": str(PANEL_SNAP_PX),
+        "MIN": str(PANEL_W_MIN_PX),
+        "MAX": str(PANEL_W_MAX_PX),
+        "STRIP": str(PANEL_STRIP_PX),
+        "DEF": str(PANEL_W_PX),
+        "FBASE": str(FONT_BASE_PX),
+        "FMAX": str(FONT_MAX_PX),
+        "FCANVAS": str(FONT_CANVAS_REM),
+        "PWREM": str(PANEL_W_REM),
+        "NARROW": str(NARROW_BP_PX),
+        "PHONE": str(PHONE_BP_PX),
+    })
 
 
 def inject_frontend_js():
@@ -565,6 +641,12 @@ def _layout_css(light):
           /* D-050: the ONE panel-width variable. The shim overrides it inline on <html>
              (persisted in localStorage); this rule is only the first-paint default. */
           :root { --charts-w: __PANEL_W__; --sb-w: __PANEL_W__; }
+          /* D-063: ONE source of truth for the interactive accent (leader-blue, BLUE at the top
+             of this module). Theme-independent, so it is static in :root. `--accent` for hex
+             contexts (color/background/border), `--accent-rgb` for rgba() tint+outline fills.
+             NB: the go.Scatter / add_hline colours in views.py stay Python hex (BLUE & co.) —
+             they are serialised as JSON, where var() is meaningless. */
+          :root { --accent: #4c8dff; --accent-rgb: 76,141,255; }
 
           /* D-050 v2 (Pavel: IDENTICAL behavior on both sides): the LEFT panel is st.sidebar
              with its native chrome SUPPRESSED — width imposed by --sb-w (re-resizable's
@@ -664,7 +746,14 @@ def _layout_css(light):
           .st-key-topbar [data-testid="stElementContainer"]:has([data-testid="stButtonGroup"])
             { margin-left: auto; }
           .st-key-topbar [data-testid="stButtonGroup"] { margin-left: auto; }
-          /* the "Model:" label sits flush against the level selector, vertically centred */
+          /* the "Model:" label sits flush against the level selector, vertically centred.
+             (D-064) Streamlit gives every markdown container a ~-1rem bottom margin; here it
+             collapsed the label's flex item to a fraction of the text height, so the column's
+             align-items:center anchored the collapsed box at the row mid-line and the real text
+             overflowed ~8px BELOW the selectbox centre. Zeroing that margin restores the label's
+             true box height so it centres against the ~41px selectbox. */
+          .st-key-topbar [data-testid="stColumn"]:has(.model-label)
+            [data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
           .st-key-topbar .model-label { text-align: right; font-weight: 600; opacity: 0.8;
             white-space: nowrap; font-size: 0.95rem; }
           /* the ⓘ level-explainer popover: hidden on wide (the selectbox tooltip covers it),
@@ -683,10 +772,20 @@ def _layout_css(light):
              markdown, same class of bug as the footer) that cropped the subtitle out of the
              bar — neutralize ALL inner margins so the title+subtitle sit as one centered
              block with balanced padding on 1.59 (local) and 1.57 (stlite) alike. */
-          .st-key-apptitle { padding: 0.6rem 1rem 0.7rem; text-align: center;
+          .st-key-apptitle { position: relative; padding: 0.6rem 1rem 0.7rem; text-align: center;
             background: __PANEL_BG__; border-radius: 10px;
             border: 1px solid rgba(128,128,128,0.15); }
           .st-key-apptitle div { margin: 0 !important; }
+          /* (D-058) the ⓘ replay-intro control, pinned to the title bar's right edge */
+          #tourInfo { position: absolute; top: 50%; right: 0.7rem; transform: translateY(-50%);
+            width: 1.55rem; height: 1.55rem; border-radius: 999px; display: grid;
+            place-items: center; font-size: 0.95rem; line-height: 1; cursor: pointer;
+            opacity: 0.5; background: transparent; color: inherit;
+            border: 1px solid rgba(128,128,128,0.35);
+            transition: opacity 0.15s, color 0.15s, border-color 0.15s; }
+          #tourInfo:hover { opacity: 1; color: var(--accent); border-color: var(--accent); }
+          html[data-app-mode="phone"] #tourInfo { right: 0.4rem; width: 1.35rem; height: 1.35rem;
+            font-size: 0.82rem; }
           /* the prose max-width cap (base CSS) would pin the title/footer text left — lift it */
           .st-key-apptitle [data-testid="stMarkdownContainer"],
           .st-key-appfooter [data-testid="stMarkdownContainer"]
@@ -709,7 +808,7 @@ def _layout_css(light):
           .st-key-appfooter .appfooter-inner { font-size: 0.72rem; opacity: 0.55; }
           .st-key-appfooter .appfooter-sep { margin: 0 0.55rem; }
           .st-key-appfooter a { color: inherit; text-decoration: underline; }
-          .st-key-appfooter a:hover { color: #4c8dff; opacity: 1; }
+          .st-key-appfooter a:hover { color: var(--accent); opacity: 1; }
           /* the middle tabbed pane = the flexible remainder */
           [data-testid="stColumn"]:has(.st-key-mainpane) {
             flex: 1 1 0 !important; min-width: 320px !important; }
@@ -753,7 +852,7 @@ def _layout_css(light):
           #chartsDivider { right: calc(var(--charts-w) - 4px); }
           #sbDivider { left: calc(var(--sb-w) - 4px); }
           #chartsDivider::after, #sbDivider::after { content: ""; position: absolute;
-            left: 3px; top: 0; height: 100%; width: 3px; background: #4c8dff; opacity: 0;
+            left: 3px; top: 0; height: 100%; width: 3px; background: var(--accent); opacity: 0;
             transition: opacity 0.1s; }
           #chartsDivider:hover::after,
           html[data-charts-dragging] #chartsDivider::after,
@@ -775,13 +874,13 @@ def _layout_css(light):
           #sbStrip { left: 0; border-right: 1px solid rgba(128,128,128,0.25); }
           html[data-charts-collapsed] #chartsStrip { display: flex; }
           html[data-sb-collapsed] #sbStrip { display: flex; }
-          #chartsStrip:hover, #sbStrip:hover { background: rgba(76,141,255,0.14); }
+          #chartsStrip:hover, #sbStrip:hover { background: rgba(var(--accent-rgb),0.14); }
           .d050-arr { font-size: 1.5rem; line-height: 1.1; opacity: 0.6; }
           .d050-lbl { writing-mode: vertical-rl; text-orientation: upright;
             font-size: 0.68rem; letter-spacing: 0.28em; opacity: 0.55; }
           #chartsStrip:hover .d050-arr, #chartsStrip:hover .d050-lbl,
           #sbStrip:hover .d050-arr, #sbStrip:hover .d050-lbl
-            { opacity: 1; color: #4c8dff; }
+            { opacity: 1; color: var(--accent); }
 
           /* the collapse controls: » at the chart panel's top-left, « at the parameter
              panel's top-right — same 1.5rem glyph, same hit area, hover-revealed, mirror
@@ -794,7 +893,7 @@ def _layout_css(light):
           #sbClose { left: calc(var(--sb-w) - 2.7rem); }
           html[data-charts-hover] #chartsClose { opacity: 0.6; }
           html[data-sb-hover] #sbClose { opacity: 0.6; }
-          #chartsClose:hover, #sbClose:hover { opacity: 1 !important; color: #4c8dff; }
+          #chartsClose:hover, #sbClose:hover { opacity: 1 !important; color: var(--accent); }
           html[data-charts-collapsed] #chartsClose { display: none; }
           html[data-sb-collapsed] #sbClose { display: none; }
 
@@ -808,7 +907,7 @@ def _layout_css(light):
           [class*="st-key-ieq_"] button
             { border: none; background: transparent; padding: 0 2px; min-height: 1.2rem;
               line-height: 1.2; font-size: 0.85rem; opacity: 0.65; }
-          [class*="st-key-ieq_"] button:hover { opacity: 1; color: #4c8dff; }
+          [class*="st-key-ieq_"] button:hover { opacity: 1; color: var(--accent); }
           /* (D-055) equations→parameters HOVER highlight. The shim reads a hidden per-subsection
              marker (.eqhl-src carries the mapped sidebar row keys) and, while the mouse is over a
              subsection, sets data-eqhover on <html> and injects an #eqhlStyle rule that
@@ -842,7 +941,7 @@ def _layout_css(light):
             { border: none; background: transparent; padding: 0 2px; min-height: 1.2rem;
               line-height: 1.2; font-size: 0.85rem; opacity: 0.65; }
           section[data-testid="stSidebar"] [class*="st-key-row_"] button:hover
-            { opacity: 1; color: #4c8dff; }
+            { opacity: 1; color: var(--accent); }
 
           /* ---- D-051 graph-height: the shim sets --chart-h (clamp of panel-width × aspect and
              the vertical fill); the responsive (autosize, height="stretch") plotly charts fill a
@@ -875,14 +974,14 @@ def _layout_css(light):
           html[data-app-mode="narrow"] #graphsTab,
           html[data-app-mode="phone"]  #graphsTab { display: inline-flex !important;
             align-items: center; margin-left: 6px; cursor: pointer; }
-          html[data-graphs-open="1"] #graphsTab { color: #4c8dff; }
+          html[data-graphs-open="1"] #graphsTab { color: var(--accent); }
           /* the overlay's close × (body-level), only while the charts overlay is showing */
           #graphsClose { display: none; position: fixed; top: 4.2rem; right: 0.6rem; z-index: 121;
             font-size: 1.7rem; line-height: 1; cursor: pointer; color: __TX__;
             background: __PANEL_BG__; border-radius: 8px; padding: 0 0.55rem; }
           html[data-app-mode="narrow"][data-graphs-open="1"] #graphsClose,
           html[data-app-mode="phone"][data-graphs-open="1"]  #graphsClose { display: block; }
-          #graphsClose:hover { color: #4c8dff; }
+          #graphsClose:hover { color: var(--accent); }
           /* (D-054) overlay charts: stlite 1.57 charts re-fit to the full overlay width via the
              shim's Plotly.Plots.resize; a build whose chart width is server-computed (1.59 dev)
              ignores that, so any narrower-than-overlay plot at least sits CENTERED, not pinned
@@ -958,16 +1057,64 @@ def _layout_css(light):
           #rotateOverlay .rot-ic { font-size: 2.6rem; }
           #rotateOverlay .rot-h { font-size: 1.05rem; font-weight: 600; color: __TX__; }
           #rotateOverlay .rot-p { font-size: 0.9rem; color: __TX__; opacity: 0.7; max-width: 26ch; }
-          #rotateOverlay a { color: #4c8dff; cursor: pointer; text-decoration: underline;
+          #rotateOverlay a { color: var(--accent); cursor: pointer; text-decoration: underline;
             font-size: 0.9rem; }
+
+          /* ============== D-064 desktop min-width floor (fine pointer only) ==============
+             On a fine (mouse/trackpad) pointer the layout is ALWAYS the full three-column wide
+             mode (modeFor gates narrow/phone on a coarse pointer). To stop a narrow desktop
+             window from squeezing the middle to nothing, the app view container carries a
+             min-width; below it the app scrolls HORIZONTALLY — only the inner scroll container
+             (stApp) scrolls; the body never breaks. The transform makes stAppViewContainer the
+             containing block for the fixed chart panel, so at sub-floor widths the panel scrolls
+             WITH the content (anchored to the container's right edge) instead of staying glued to
+             the viewport edge; at/above the floor the container IS the viewport so nothing moves.
+             Scoped to (pointer: fine) so the touch / phone experience is entirely untouched. */
+          @media (pointer: fine) {
+            [data-testid="stApp"] { overflow-x: auto; }
+            [data-testid="stAppViewContainer"] {
+              min-width: __APP_MINW__; transform: translateZ(0); }
+          }
+
+          /* ---- D-066/D-069: keep the WHOLE 1240px canvas as ONE scrolling row (narrow fine-ptr) --
+             D-064 anchored the fixed RIGHT chart panel to the (transformed) view container so it
+             scrolls WITH the content. Two LEFT-side escapees remain below the floor, and BOTH are
+             pinned back into the normal flex row here so the centre's left edge is never occluded
+             at any sub-floor width:
+             (D-066) the SIDEBAR — below Streamlit's ≤768 breakpoint Streamlit lifts it toward a
+               fixed/overlay layer; force it back to an in-flow relative column (it has z-index
+               999991, so an overlay would paint over the centre).
+             (D-069) the CENTRE — at ≤768 Streamlit also switches [data-testid="stMain"] to
+               position:absolute for that overlay mode; because stAppViewContainer is a containing
+               block (the D-064 transform), the absolute main then lands at left:0 / full 1240px
+               width, i.e. UNDERNEATH the in-flow sidebar, and the sidebar's z-index crops its left
+               (Pavel saw "…er AI Labs Be Profitable?" — the "Will Front" hidden). Forcing stMain
+               back to static returns it to the flex row AFTER the sidebar. This is a no-op in the
+               768–1239 band (stMain is already static there) and fixes the ≤768 band.
+             Result: [sidebar | centre | right] is one flex row that scrolls as a unit — at
+             scroll-x=0 you see the full sidebar and the centre's left edge; scrolling right scrolls
+             the sidebar off-screen and reveals the rest. Scoped below the floor, so the WIDE layout
+             (≥ the floor) is byte-for-byte unchanged. */
+          @media (pointer: fine) and (max-width: __APP_MINW_M1__) {
+            section[data-testid="stSidebar"] {
+              position: relative !important; left: auto !important; right: auto !important;
+              top: auto !important; bottom: auto !important; transform: none !important; }
+            [data-testid="stMain"] {
+              position: static !important; left: auto !important; right: auto !important;
+              width: auto !important; }
+          }
         </style>
         """
-    return (css.replace("__TOPBAR_BG__", topbar_bg)
-               .replace("__PANEL_BG__", panel_bg)
-               .replace("__TX__", text_col)
-               .replace("__PANEL_W__", f"{PANEL_W_PX}px")
-               .replace("__GUTTER__", f"{PANEL_GUTTER_PX}px")
-               .replace("__STRIP__", f"{PANEL_STRIP_PX}px"))
+    return _substitute(css, {
+        "TOPBAR_BG": topbar_bg,
+        "PANEL_BG": panel_bg,
+        "TX": text_col,
+        "PANEL_W": f"{PANEL_W_PX}px",
+        "GUTTER": f"{PANEL_GUTTER_PX}px",
+        "STRIP": f"{PANEL_STRIP_PX}px",
+        "APP_MINW": f"{APP_MIN_W_PX}px",
+        "APP_MINW_M1": f"{APP_MIN_W_PX - 1}px",
+    })
 
 
 def inject_layout_css():
@@ -995,8 +1142,8 @@ def inject_cal_emphasis_css(row_keys):
           section[data-testid="stSidebar"] [class*="st-key-row_"]
             {{ opacity: 0.4; transition: opacity 0.15s; }}
           {sel}
-            {{ opacity: 1 !important; background: rgba(76,141,255,0.10);
-               outline: 2px solid rgba(76,141,255,0.40); }}
+            {{ opacity: 1 !important; background: rgba(var(--accent-rgb),0.10);
+               outline: 2px solid rgba(var(--accent-rgb),0.40); }}
         </style>
         """,
         unsafe_allow_html=True,

@@ -28,33 +28,37 @@
   </script>
   <title>Frontier-AI-lab competition — interactive explorer</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/browser@1.8.1/build/stlite.css" />
-  <link rel="stylesheet" href="./intro.css?v=3" />
+  <!-- shared tour deck styling + the laptop overlay chrome (D-058) -->
+  <link rel="stylesheet" href="./tour.css?v=1" />
+  <link rel="stylesheet" href="./intro.css?v=4" />
   <style>
     html, body, #root { margin: 0; padding: 0; height: 100%; }
-    /* critical inline fallback: the boot cover must paint IMMEDIATELY, even if intro.css
-       is still in flight (phone first loads saw a blank page otherwise) */
+    /* critical inline fallback: the intro overlay must paint IMMEDIATELY, before
+       tour.css/intro.css land (no blank flash on a cold load). intro.js replaces
+       this content with the full deck / minimal card as soon as it runs. */
     #intro { position: fixed; inset: 0; z-index: 1000000; background: #0e1117; color: #e6e6df;
-      display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
-      overflow-y: auto; padding: 1rem;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: .6rem; padding: 1rem; text-align: center;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    #intro .i-boot-title { font-size: 1.5rem; font-weight: 700; }
+    #intro .i-boot-sub { font-size: .85rem; opacity: .7; max-width: 30rem; }
     @media (prefers-color-scheme: light) { #intro { background: #ffffff; color: #31333f; } }
   </style>
 </head>
 <body>
-  <!-- Boot overlay: instant minimal cover; intro.js expands it into the loading intro
-       (guess hook + optional model primer) unless the app is ready within a grace
-       window (cached visits). intro.{js,css} live at the repo root, OUTSIDE the
-       src/ tree that deploy/sync.sh rewrites. -->
+  <!-- Intro-tour overlay (D-058): instant minimal cover; tour.js + intro.js expand it
+       into the full deck (first visit) or a minimal loading card (return visit), shown
+       ON TOP of the widget while it boots (widget blurred behind). The tour is optional —
+       an always-present × / ready button lets the user leave anytime. tour.{js,css},
+       intro.{js,css} live at the repo ROOT, OUTSIDE the src/ tree deploy/sync.sh rewrites. -->
   <div id="intro">
-    <div class="i-min">
-      <div class="i-spin"></div>
-      <div>Loading the explorer…</div>
-      <small>Runs entirely in your browser (Python via WebAssembly) — nothing is sent
-        to a server. First load takes ~30&#8211;60 seconds.</small>
-    </div>
+    <div class="i-boot-title">Will frontier AI labs be profitable?</div>
+    <div class="i-boot-sub">Preparing the interactive explorer — runs entirely in your
+      browser (Python via WebAssembly), nothing is sent to a server.</div>
   </div>
   <div id="root"></div>
-  <script src="./intro.js?v=3" defer></script>
+  <script src="./tour.js?v=1" defer></script>
+  <script src="./intro.js?v=4" defer></script>
   <script type="module">
     import { mount } from "https://cdn.jsdelivr.net/npm/@stlite/browser@1.8.1/build/stlite.js";
     import { APP_FILES } from "./app_files.js";
@@ -81,7 +85,9 @@
       },
       document.getElementById("root"),
     );
-    // The overlay's removal (on Streamlit's first real paint) is handled by intro.js.
+    // intro.js watches for Streamlit's first real paint to flip the overlay's boot
+    // button to "ready"; the overlay itself is dismissed only by the user (× / button /
+    // backdrop-after-ready), never automatically.
   </script>
 </body>
 </html>

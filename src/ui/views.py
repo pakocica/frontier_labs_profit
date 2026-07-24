@@ -118,13 +118,14 @@ def _finance_tile(d, sim, hl, LEVEL, mode_mc, mc_key):
     return need_rerun
 
 
-def _model_tile(d, sim, LEVEL, mode_mc, mc_key):
-    """Model path second: capability / gap (and, with the growth engine, compute & algo) —
-    point paths, or the capability-gap fan in Monte-Carlo mode."""
+def _capability_tile(d, sim, LEVEL, mode_mc, mc_key):
+    """Capability paths + the gap Δ (and, with the growth engine, the RSI-feedback share ψ that
+    rides with the gap). Point paths, or the capability-gap fan in Monte-Carlo mode.
+    D-068: the algo-progress and compute graphs moved out to their own level-gated tabs."""
     served = d["tau"] > 0.0                 # x^R differs from x^L only under a release delay
     show_growth = LEVEL >= 3
     with st.container(border=False):
-        # D-054 (round 2): no section header (the group switch names it) and no how-to-read —
+        # D-054 (round 2): no section header (the tab switch names it) and no how-to-read —
         # each chart title is self-explanatory instead. D-056: border=False (see _finance_tile).
         if mode_mc:
             mc_panel_path(mc_key)
@@ -158,22 +159,60 @@ def _model_tile(d, sim, LEVEL, mode_mc, mc_key):
                         annotation_position="top left", annotation_font_size=10)
         show(f, key="pt_gap")
 
-        if show_growth:
-            with st.expander("Compute & algorithmic progress (the two engines behind x)",
-                             expanded=False):
-                f = fig_base("Compute — leader vs follower  c(t)", "year",
-                             "OOM above 2026 frontier", height=220)
-                line(f, sim["t"], sim["c_L"], "leader  cᴸ", C_LEADER)
-                line(f, sim["t"], sim["c_F"], "follower  cᶠ", C_FOLLOWER)
-                show(f, key="pt_comp")
-                f = fig_base("Algorithmic progress — leader vs follower  a(t)", "year",
-                             "OOM above 2026 frontier", height=220)
-                line(f, sim["t"], sim["a_L"], "leader  aᴸ", C_LEADER)
-                line(f, sim["t"], sim["a_F"], "follower  aᶠ", C_FOLLOWER)
-                show(f, key="pt_algo")
-                st.caption("Catch-up flows through the *algorithmic* channel, so the follower's "
-                           "$a$ can overtake the leader's $a$ while its total capability $x$ "
-                           "still trails — the compute deficit is what keeps the gap open.")
+
+def _algo_tile(sim):
+    """Algorithmic-progress paths a(t) — its own tab from L3 (D-068: moved out of Capability,
+    where it crowded the gap graph). Both actors, unchanged data: catch-up flows through the
+    algorithmic channel, so the follower's a can overtake the leader's while its total x trails."""
+    with st.container(border=False):
+        f = fig_base("Algorithmic progress — leader vs follower  a(t)", "year",
+                     "OOM above 2026 frontier", height=230)
+        line(f, sim["t"], sim["a_L"], "leader  aᴸ", C_LEADER)
+        line(f, sim["t"], sim["a_F"], "follower  aᶠ", C_FOLLOWER)
+        show(f, key="pt_algo")
+        st.caption("Catch-up flows through the *algorithmic* channel, so the follower's $a$ can "
+                   "overtake the leader's $a$ while its total capability $x$ still trails — the "
+                   "compute deficit is what keeps the gap open.")
+
+
+def _compute_tile(sim, LEVEL):
+    """Compute paths c(t) — its own tab from L4 (D-068). The follower's compute is NOT modeled
+    before L6, so L4–L5 plots ONLY the leader's frontier compute; L6 (catch-up channels) adds
+    the follower's compute line alongside the leader's (Pavel's explicit instruction)."""
+    both = LEVEL >= 6
+    with st.container(border=False):
+        ttl = ("Compute — leader vs follower  c(t)" if both
+               else "Compute — leader (frontier)  c(t)")
+        f = fig_base(ttl, "year", "OOM above 2026 frontier", height=230)
+        line(f, sim["t"], sim["c_L"], "leader  cᴸ", C_LEADER)
+        if both:
+            line(f, sim["t"], sim["c_F"], "follower  cᶠ", C_FOLLOWER)
+        show(f, key="pt_comp")
+        st.caption(
+            "Compute is the capital-intensive engine behind capability. "
+            + ("The follower's own compute enters the model at this level, plotted alongside "
+               "the leader's frontier compute." if both
+               else "The follower's own compute is not modeled until the catch-up-channels "
+                    "level (6); here only the leader's frontier compute is shown."))
+
+
+def _value_tile(sim):
+    """Value flows W over the horizon — its own tab from L5 (D-068). LOG y-axis: W(x) grows
+    ~exponentially with capability, so on a log scale the value levels read off as slopes.
+    x-axis is the horizon (year) — the quantity the model exposes cleanly (W_R, W_F are already
+    integrated per t), and it keeps the tab consistent with the other time-series tabs. The two
+    lines are the served-leader value W(xᴿ) and the follower value W(xᶠ), whose gap the leader
+    earns rent on."""
+    with st.container(border=False):
+        f = fig_base("Value over time — leader served vs follower  W  ($B/yr, log)",
+                     "year", "$/yr  ($B, log scale)", height=230)
+        line(f, sim["t"], sim["W_R"], "leader served  W(xᴿ)", C_LEADER)
+        line(f, sim["t"], sim["W_F"], "follower  W(xᶠ)", C_FOLLOWER)
+        f.update_yaxes(type="log")
+        show(f, key="pt_value")
+        st.caption("Each actor's capability commands a dollar value $W(x)$ (\\$B/yr); the leader "
+                   "earns rent on the **gap** $W(x^R) - W(x^F)$ between the two lines. Log "
+                   "y-axis: near-exponential value growth reads as straight-line slopes.")
 
 
 def _delay_section(d, items, LEVEL):
@@ -291,18 +330,35 @@ def _charts_column(d, items, sim, hl, p, LEVEL, mode_mc, mc_key, sample_keys):
     switch (one tile group at a time — Pavel; charts inside a group still stack vertically),
     with warnings on top and the level-gated extras under Finance."""
     with st.container(key="chartscol"):
-        # ---- the group switch (same segmented idiom as the middle pane's tabs); the shadow
-        # mem key is belt-and-braces for widget GC, mirroring the pane_tab pattern
-        # D-054 (round 2): the switch already names the visible group, so the per-group
-        # section headers were dropped — options renamed to Graphs (finance/profit) | Capability.
-        _reg("charts_tab", st.session_state.get("_charts_tab_mem", "Graphs"))
-        tab = st.segmented_control("Charts", ["Graphs", "Capability"], key="charts_tab",
+        # ---- the tab switch (same segmented idiom as the middle pane's tabs); the shadow
+        # mem key is belt-and-braces for widget GC, mirroring the pane_tab pattern.
+        # D-068: five tabs, introduced progressively by level. Financial + Capability are always
+        # present; Algo progress from L3, Compute from L4, Value from L5 (Compute gains the
+        # follower line at L6). D-054 (round 2): the switch already names the visible tab, so
+        # there are no per-tab section headers.
+        tab_labels = ["Financial", "Capability"]
+        if LEVEL >= 3:
+            tab_labels.append("Algo progress")
+        if LEVEL >= 4:
+            tab_labels.append("Compute")
+        if LEVEL >= 5:
+            tab_labels.append("Value")
+        default_tab = st.session_state.get("_charts_tab_mem", "Financial")
+        if default_tab not in tab_labels:
+            default_tab = "Financial"
+        _reg("charts_tab", default_tab)
+        # a level DROP can leave the persisted widget value pointing at a now-hidden tab, which
+        # would make st.segmented_control raise — reseed it to a still-valid tab first
+        if st.session_state.get("charts_tab") not in tab_labels:
+            st.session_state["charts_tab"] = default_tab
+        tab = st.segmented_control("Charts", tab_labels, key="charts_tab",
                                    label_visibility="collapsed",
-                                   help="One chart group at a time. The Monte-Carlo "
-                                        "accumulation keeps running whichever is shown.") \
-            or "Graphs"
+                                   help="One graph tab at a time; more tabs unlock as the level "
+                                        "rises. The Monte-Carlo accumulation keeps running "
+                                        "whichever is shown.") \
+            or default_tab
         st.session_state["_charts_tab_mem"] = tab
-        fin_vis = tab == "Graphs"
+        fin_vis = tab == "Financial"
         _warnings(sim, LEVEL)
         if mode_mc:
             with st.expander("How to read the Monte-Carlo fans", expanded=False):
@@ -327,8 +383,14 @@ def _charts_column(d, items, sim, hl, p, LEVEL, mode_mc, mc_key, sample_keys):
                 _delay_section(d, items, LEVEL)   # profit trade-off → rides with Finance
             if LEVEL >= 9:
                 _hood_section(p, hl)
-        else:
-            _model_tile(d, sim, LEVEL, mode_mc, mc_key)
+        elif tab == "Capability":
+            _capability_tile(d, sim, LEVEL, mode_mc, mc_key)
+        elif tab == "Algo progress":
+            _algo_tile(sim)                       # point paths (no MC fan for a(t))
+        elif tab == "Compute":
+            _compute_tile(sim, LEVEL)             # leader only < L6; +follower at L6
+        elif tab == "Value":
+            _value_tile(sim)                      # W over the horizon, log y-axis
         if not (mode_mc and fin_vis):
             # CRITICAL invariant: exactly ONE finance-component mount per run. It is visible
             # only on (MC mode ∧ Finance tab); in every other state it mounts HIDDEN so its

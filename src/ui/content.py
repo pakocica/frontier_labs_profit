@@ -1,124 +1,110 @@
-"""Content & parameter metadata — the ONE app-side home for prose and labels:
-interpretation texts (INTERP/INTERP_T), target slider specs (TSPEC), level cards and
-notation, calibration captions (_CAL_TARGET/_CAL_ALT), grades, and the three label maps
-(LaTeX / plain words / unicode). Envelope+tight ranges, CAL_SOURCES and inversions stay in
-the NOTEBOOK (single source of truth); this module only holds app-side presentation.
+"""Content & parameter metadata — the ONE app-side home for prose and labels.
+
+Per-parameter metadata lives in a single registry `PARAMS: dict[str, ParamMeta]` (D-061); the
+historical dict names — interpretation texts (INTERP), the three label maps (_MATH_LABEL /
+_SHORT_NAME / _UNI_LABEL: LaTeX / plain words / unicode), calibration captions (_CAL_TARGET /
+_CAL_ALT) and grades (GRADES) — are thin DERIVED VIEWS over it, so consumers are unchanged.
+Target-specific content (INTERP_T, TSPEC), level cards and notation stay as their own maps.
+Envelope+tight ranges, CAL_SOURCES and inversions stay in the NOTEBOOK (single source of truth);
+this module only holds app-side presentation.
 """
+from dataclasses import dataclass
+
 import numpy as np
 import streamlit as st
 
 from .model_access import m, P0
 
 
-# ======================================================================= per-parameter interpretation
-# Concise (units, plain-language meaning, reference anchor). Math symbols are wrapped in inline
-# LaTeX ($...$) — this renders in st.markdown, captions, popovers AND slider label=/help= tooltips
-# (all verified). Literal dollar amounts stay escaped as \$. Grounding: Notes/calibration_master.md.
-# Used as BOTH the slider `help=` tooltip and the per-parameter "what does this value mean?" popover.
-INTERP = {
-    # --- key parameters ---
-    "gamma": "**$\\gamma$ — $\\psi$ compounding, per OOM.** Strength of the recursive-self-"
-             "improvement (RSI) feedback: each OOM of capability multiplies AI-R&D speed by "
-             "$e^{\\gamma x}$. $\\gamma = 0$ disables it entirely (freeze). $\\gamma \\gtrsim 0.42$ "
-             "goes super-exponential — finite-time blow-up inside the 10-yr horizon (spec N4). "
-             "Default 0.2, tentative (grade C).",
-    "x_mid": "**$x_{mid}$ — value-curve bend, OOM above the 2026 frontier.** Where $W(x)$ turns "
-             "from exponential to saturating. Reference values: **2** = value saturates early "
-             "(commoditization); **5** = mid; **10** = harvest continues across the horizon. "
-             "Pivotal knob (grade C).",
-    "theta": "**$\\theta$ — conduct / operating margin ($\\theta = \\rho\\eta$).** Leaders' share "
-             "of the capability-gap rent they actually extract. Range [0.15, 0.6], triangular mode "
-             "0.35 from Cournot triangulation ($n \\approx 3$–5 → $\\rho \\approx 1/(n{+}1)$), "
-             "softened by differentiation/lock-in. NOT the 60–80% gross margin (Lerner-index "
-             "trap). Grade C.",
-    "delta_dev": "**$\\delta_{dev}$ — developed-model diffusion, per yr.** Release-invariant "
-                 "(ambient) catch-up: the follower closes the *algorithmic* gap via talent, "
-                 "published methods and ambient know-how even with nothing released. Default 0.20; "
-                 "U[0.08, 0.40]/yr. Jointly calibrated with $\\delta_{rel}$ so the observed "
-                 "~8-month lag is stationary (see $\\delta$); weakly identified (grade C).",
-    "delta_rel": "**$\\delta_{rel}$ — released-model distillation, per yr.** Release-controlled "
-                 "channel: the follower distills from the model the leader serves ($x^R$, which "
-                 "equals $x^L$ until a release delay is set). This is the lever release delay acts "
-                 "on. Default 0.26; U[0.12, 0.75]/yr; jointly calibrated with $\\delta_{dev}$ for "
-                 "lag stationarity (grade C). **$\\delta_{rel} = 0$ = distillation disabled** — "
-                 "released channel off; the follower catches up through $\\delta_{dev}$ only.",
-    "g_C_inf": "**$g_{c\\infty}$ — compute-growth floor, OOM/yr.** Long-run compute growth once "
-               "scaling hits limits (power ~2030). 0.13 OOM/yr ≈ 1.35×/yr (hardware-only). The "
-               "floor *level* is our extrapolation (grade C); widget-critical for the slowdown "
-               "scenario.",
-    "tau": "**$\\tau$ — release / withholding delay, months.** Policy lever: "
-           "$x^R_t = x^L_{t-\\tau}$, the leader serves the model it had $\\tau$ ago. "
-           "$\\tau = 0$ = release immediately (baseline). Capped at the 3-month policy-relevant "
-           "range. Grade F by design (a decision variable, not calibrated).",
-    # --- compute ---
-    "g_C0": "**$g_{c0}$ — physical compute growth today, OOM/yr.** 0.623 = log10(4.2), i.e. "
-            "4.2×/yr (Epoch; multiple series agree — grade A).",
-    "xi": "**$\\xi$ — slowdown decay rate, per yr.** How fast $g_c(t)$ decays from $g_{c0}$ toward "
-          "the floor: $g_c(t) = g_{c\\infty} + (g_{c0} - g_{c\\infty})e^{-\\xi t}$. Pure scenario "
-          "knob (grade F) — sweep it.",
-    # --- algorithmic progress / AI assistance ---
-    "g_a": "**$g_a$ — algorithmic progress today, OOM/yr.** 0.447 = log10(2.8), i.e. 2.8×/yr "
-           "pretraining-efficiency gains (Ho et al. and Whitfill et al., two independent "
-           "anchors → grade A).",
-    "alpha": "**$\\alpha$ — experiment-compute weight in the CES research bracket.** Share of algo "
-             "progress driven by experiment compute vs researchers. 0.5 placeholder "
-             "(grade F → calibration).",
-    "eta": "**$\\eta$ — CES exponent for compute–labor substitution in research.** "
-           "$\\eta = 1$ weighted avg; $\\eta \\to 0$ Cobb-Douglas; $\\eta < 0$ complements; "
-           "min = Leontief. From Whitfill & Wu 2025 ($\\sigma = 2.58$ substitutes / ≈ 0 "
-           "complements — sign flips on controls, grade B).",
-    "rho0": "**$\\rho_0$ — AI-R&D speedup today.** $\\psi(0) = 1 + \\rho_0$ is the current "
-            "AI-assistance multiplier on research throughput. 0.3 tentative (grade C).",
-    # --- follower catch-up ---
-    "Delta0": "**$\\Delta_0$ — initial capability gap, OOM.** The follower starts $\\Delta_0$ OOM "
-              "behind. Central 0.7 OOM (~8-month lag: METR agentic, private benches), MC "
-              "[0.35, 1.4]. Benchmark lags are *lower bounds* (benchmaxxing). Grade A/B.",
-    "split": "**split — algo share of $\\Delta_0$.** How much of the initial gap is algorithmic vs "
-             "compute. 0.5 placeholder (grade F, open question).",
-    "g_a_F": "**$g_a^F$ — follower algo progress, OOM/yr.** ≈ 0.7·$g_a$: progress is scale-biased "
-             "(frontier improves faster than small scale — Gundlach), "
-             "$\\theta^F/\\theta^L \\approx 0.6$–0.8 → 0.31 OOM/yr. Grade B.",
-    "g_CF0": "**$g_{c0}^F$ — follower compute growth today, OOM/yr.** Chinese/fringe compute "
-             "build-out → calibration. 0.5 placeholder (grade C).",
-    "g_CF_inf": "**$g_{c\\infty}^F$ — follower compute-growth floor, OOM/yr.** Long-run follower "
-                "compute growth after slowdown. 0.10 placeholder (grade C/F).",
-    "xi_F": "**$\\xi^F$ — follower slowdown decay, per yr.** Decay of $g_c^F(t)$ toward its "
-            "floor. Scenario knob (grade F).",
-    # --- value & demand ---
-    "W0": "**$W_0$ — value at today's frontier, \\$B/yr.** Absolute dollar scale of $W(0)$, "
-          "reverse-engineered so $\\theta\\,\\Delta W \\approx$ \\$50B matches observed frontier "
-          "gross profit. NOT independently pinned (grade F, calibration gap #1).",
-    "nu": "**$\\nu$ — value curvature, value-OOMs per capability-OOM.** Base-10 slope of "
-          "log-value in the exponential regime: each capability OOM multiplies value by "
-          "$10^{\\nu}$. (0, $\\log_{10} 3$] from per-task token blow-up / cost-intensity; "
-          "0.239 = 0.55/ln 10 (grade C; log10 units).",
-    # --- costs & prices ---
-    "phi_RD": "**$\\phi_{RD}$ — R&D markup on compute.** Cost = $(1 + \\phi_{RD})\\cdot$ "
-              "train-compute flow: staff + experiments on top of the final run. 1.0 ≈ "
-              "experiments+staff double the final run (grade C).",
-    "ell": "**$\\ell$ — training lead time, yr.** How much in advance the next model's compute is "
-           "bought/trained: the firm pays at $t$ for the compute of the model shipping at "
-           "$t+\\ell$, so today's bill is $10^{\\,g_{c0}\\ell}\\times$ the current model's "
-           "(≈ ⟪JUMP⟫× at $\\ell = $ ⟪ELL⟫) — this is what turns the roughly break-even "
-           "per-model economics of Level 1 into a flow loss. Default 0.5 yr, U[0.25, 1.0] "
-           "(grade B).",
-    "S0": "**$S_0$ — today's training spend, \\$B/yr.** Combined frontier annual training-compute "
-          "spend; anchors the cost scale (N3). 40 \\$B/yr (grade C).",
-    "g_p": "**$g_p$ — effective compute-price decline, OOM/yr.** 0.243 = log₁₀(4.2/2.4): chosen "
-           "so cost growth reproduces Cottier's 2.4×/yr given compute growth 4.2×/yr — prices "
-           "fall to $10^{-g_p} \\approx 57\\%$ of the year before. Hardware-only "
-           "price-performance is ~1.35×/yr ($g_p \\approx 0.13$) — the three anchors can't all "
-           "hold; we keep the two better-measured. Grade B/C; log10 "
-           "units.",
-    "r": "**$r$ — discount rate, per yr.** Only used by the ownership user-cost extension (II.6); "
-         "the widget reports **undiscounted** profit flows, not NPV, so $r$ is hidden unless "
-         "II.6 is on. 0.08 (grade C).",
-    # --- simulation ---
-    "T": "**$T$ — horizon, yr.** The time window every graph uses. Switch between **5 yr** and "
-         "**10 yr** with the toggle at the top of the sidebar; default 10 yr (the walkthrough "
-         "horizon). The N5 harvest condition is asymptotic and reported analytically, not "
-         "plotted beyond 10 yr.",
+# ======================================================================= parameter registry
+# ONE registry keyed by parameter — the single home for a parameter's label/prose metadata,
+# replacing seven parallel param-keyed dicts that used to drift out of sync (D-061). Every field
+# is OPTIONAL; a parameter carries only the metadata it has. The seven historical dict names live
+# below as thin DERIVED VIEWS over PARAMS, so every consumer (sidebar / calpanel / equations /
+# calibration / views) is unchanged.
+#
+# Key PRESENCE is load-bearing: the `.get(k, k)` / `.get(k, '—')` fallbacks at the call sites
+# encode behaviour (e.g. `tau` is deliberately absent from _MATH_LABEL so it renders the literal
+# "tau"). A derived view therefore omits EXACTLY the keys whose field is None — never "helpfully"
+# fill a missing field. (Envelope/tight ranges, CAL_SOURCES and inversions stay in the NOTEBOOK,
+# the single source of truth; this module only holds app-side presentation.)
+#
+# Field meanings (each was one dict before D-061):
+#   interp     — INTERP: concise per-parameter interpretation (units, plain-language meaning,
+#                reference anchor). Rendered in markdown / captions / popovers AND as the slider
+#                help= tooltip. Math in inline $...$; literal dollars escaped \$. Grounding:
+#                Notes/calibration_master.md.
+#   math_label — _MATH_LABEL: LaTeX symbol (no $ delimiters).
+#   uni_label  — _UNI_LABEL: unicode symbol for contexts that can't render LaTeX (st.dataframe).
+#   short_name — _SHORT_NAME: plain-word name shown beside the symbol wherever raw code names would
+#                otherwise leak into the UI. Code names appear only in "Under the hood".
+#   cal_target — _CAL_TARGET: one-line observable FACT the parameter is calibrated to, with its
+#                number (Pavel's ruling), merged into the equations panel's right-hand cards.
+#   cal_alt    — _CAL_ALT: alternative calibration / documented tension, surfaced in the details
+#                popover.
+#   grade      — GRADES: grounding grade (A solid data anchor · B reasonable · C judgment / weakly
+#                identified · F free choice or decision variable). From Notes/calibration_master.md.
+@dataclass
+class ParamMeta:
+    interp: str | None = None
+    math_label: str | None = None
+    uni_label: str | None = None
+    short_name: str | None = None
+    cal_target: str | None = None
+    cal_alt: str | None = None
+    grade: str | None = None
+
+
+PARAMS: dict[str, ParamMeta] = {
+    'gamma': ParamMeta(interp='**$\\gamma$ — $\\psi$ compounding, per OOM.** Strength of the recursive-self-improvement (RSI) feedback: each OOM of capability multiplies AI-R&D speed by $e^{\\gamma x}$. $\\gamma = 0$ disables it entirely (freeze). $\\gamma \\gtrsim 0.42$ goes super-exponential — finite-time blow-up inside the 10-yr horizon (spec N4). Default 0.2, tentative (grade C).', math_label='\\gamma', uni_label='γ', short_name='RSI compounding', cal_target='how strongly AI-for-AI-R&D compounds (no observable yet)', grade='C'),
+    'x_mid': ParamMeta(interp='**$x_{mid}$ — value-curve bend, OOM above the 2026 frontier.** Where $W(x)$ turns from exponential to saturating. Reference values: **2** = value saturates early (commoditization); **5** = mid; **10** = harvest continues across the horizon. Pivotal knob (grade C).', math_label='x_{mid}', uni_label='x_mid', short_name='value-curve bend', cal_target="value stops compounding ~10 OOM above today's frontier", cal_alt='**Refs:** 2 = early commoditization · 5 = mid · 10 = harvest continues to the horizon.', grade='C'),
+    'theta': ParamMeta(interp="**$\\theta$ — conduct / operating margin ($\\theta = \\rho\\eta$).** Leaders' share of the capability-gap rent they actually extract. Range [0.15, 0.6], triangular mode 0.35 from Cournot triangulation ($n \\approx 3$–5 → $\\rho \\approx 1/(n{+}1)$), softened by differentiation/lock-in. NOT the 60–80% gross margin (Lerner-index trap). Grade C.", math_label='\\theta', uni_label='θ', short_name='operating margin', cal_target='3–5 competing leaders each keep ≈ 1/(n+1) of the rent', cal_alt='**Alt:** NOT the 60–80% gross margin — that is the Lerner-index trap.', grade='C'),
+    'delta_dev': ParamMeta(interp='**$\\delta_{dev}$ — developed-model diffusion, per yr.** Release-invariant (ambient) catch-up: the follower closes the *algorithmic* gap via talent, published methods and ambient know-how even with nothing released. Default 0.20; U[0.08, 0.40]/yr. Jointly calibrated with $\\delta_{rel}$ so the observed ~8-month lag is stationary (see $\\delta$); weakly identified (grade C).', math_label='\\delta_{dev}', uni_label='δ_dev', short_name='ambient diffusion', cal_target='keeps the ~8-mo lag constant — the ambient share of the wedge', grade='C'),
+    'delta_rel': ParamMeta(interp='**$\\delta_{rel}$ — released-model distillation, per yr.** Release-controlled channel: the follower distills from the model the leader serves ($x^R$, which equals $x^L$ until a release delay is set). This is the lever release delay acts on. Default 0.26; U[0.12, 0.75]/yr; jointly calibrated with $\\delta_{dev}$ for lag stationarity (grade C). **$\\delta_{rel} = 0$ = distillation disabled** — released channel off; the follower catches up through $\\delta_{dev}$ only.', math_label='\\delta_{rel}', uni_label='δ_rel', short_name='distillation', cal_target='keeps the ~8-mo lag constant — the distillation share of the wedge', grade='C'),
+    'g_C_inf': ParamMeta(interp='**$g_{c\\infty}$ — compute-growth floor, OOM/yr.** Long-run compute growth once scaling hits limits (power ~2030). 0.13 OOM/yr ≈ 1.35×/yr (hardware-only). The floor *level* is our extrapolation (grade C); widget-critical for the slowdown scenario.', math_label='g_{c\\infty}', uni_label='g_c∞', short_name='compute-growth floor', cal_target='long-run compute grows only ~×1.35/yr (hardware-only)', cal_alt='**Note:** the hardware-only floor is our extrapolation, not measured.', grade='C'),
+    'tau': ParamMeta(interp='**$\\tau$ — release / withholding delay, months.** Policy lever: $x^R_t = x^L_{t-\\tau}$, the leader serves the model it had $\\tau$ ago. $\\tau = 0$ = release immediately (baseline). Capped at the 3-month policy-relevant range. Grade F by design (a decision variable, not calibrated).', uni_label='τ', short_name='release delay', cal_target='the policy lever itself — chosen, not calibrated'),
+    'g_C0': ParamMeta(interp='**$g_{c0}$ — physical compute growth today, OOM/yr.** 0.623 = log10(4.2), i.e. 4.2×/yr (Epoch; multiple series agree — grade A).', math_label='g_{c0}', uni_label='g_c0', short_name='compute growth today', cal_target='frontier training compute grows ~×4.2/yr', grade='A'),
+    'xi': ParamMeta(interp='**$\\xi$ — slowdown decay rate, per yr.** How fast $g_c(t)$ decays from $g_{c0}$ toward the floor: $g_c(t) = g_{c\\infty} + (g_{c0} - g_{c\\infty})e^{-\\xi t}$. Pure scenario knob (grade F) — sweep it.', math_label='\\xi', uni_label='ξ', short_name='compute slowdown speed', cal_target='how fast the compute slowdown bites (scenario dial)', grade='F'),
+    'g_a': ParamMeta(interp='**$g_a$ — algorithmic progress today, OOM/yr.** 0.447 = log10(2.8), i.e. 2.8×/yr pretraining-efficiency gains (Ho et al. and Whitfill et al., two independent anchors → grade A).', math_label='g_a', uni_label='g_a', short_name='algo progress today', cal_target='algorithms add ~×2.8/yr of effective compute', grade='A'),
+    'alpha': ParamMeta(interp='**$\\alpha$ — experiment-compute weight in the CES research bracket.** Share of algo progress driven by experiment compute vs researchers. 0.5 placeholder (grade F → calibration).', math_label='\\alpha', uni_label='α', short_name='experiment-compute weight', cal_target='experiments-vs-researchers weight in R&D (no observable)', grade='F'),
+    'eta': ParamMeta(interp='**$\\eta$ — CES exponent for compute–labor substitution in research.** $\\eta = 1$ weighted avg; $\\eta \\to 0$ Cobb-Douglas; $\\eta < 0$ complements; min = Leontief. From Whitfill & Wu 2025 ($\\sigma = 2.58$ substitutes / ≈ 0 complements — sign flips on controls, grade B).', math_label='\\eta', uni_label='η', short_name='research elasticity', cal_target='how substitutable compute and researchers are in R&D', grade='B'),
+    'rho0': ParamMeta(interp='**$\\rho_0$ — AI-R&D speedup today.** $\\psi(0) = 1 + \\rho_0$ is the current AI-assistance multiplier on research throughput. 0.3 tentative (grade C).', math_label='\\rho_0', uni_label='ρ₀', short_name='AI R&D speedup today', cal_target='AI makes AI R&D ~30% faster today', grade='C'),
+    'Delta0': ParamMeta(interp='**$\\Delta_0$ — initial capability gap, OOM.** The follower starts $\\Delta_0$ OOM behind. Central 0.7 OOM (~8-month lag: METR agentic, private benches), MC [0.35, 1.4]. Benchmark lags are *lower bounds* (benchmaxxing). Grade A/B.', math_label='\\Delta_0', uni_label='Δ₀', short_name='initial gap', cal_target='the follower is ~8 months behind the frontier today', cal_alt='**Note:** benchmark lags are *lower bounds* (benchmaxxing).', grade='A/B'),
+    'split': ParamMeta(interp='**split — algo share of $\\Delta_0$.** How much of the initial gap is algorithmic vs compute. 0.5 placeholder (grade F, open question).', math_label='\\text{split}', uni_label='split', short_name='algo share of the gap', cal_target='about half the initial gap is algorithmic, half compute', grade='F'),
+    'g_a_F': ParamMeta(interp='**$g_a^F$ — follower algo progress, OOM/yr.** ≈ 0.7·$g_a$: progress is scale-biased (frontier improves faster than small scale — Gundlach), $\\theta^F/\\theta^L \\approx 0.6$–0.8 → 0.31 OOM/yr. Grade B.', math_label='g_a^F', uni_label='g_a,F', short_name='follower algo progress', cal_target="follower algo progress ≈ 70% of the leader's", grade='B'),
+    'g_CF0': ParamMeta(interp='**$g_{c0}^F$ — follower compute growth today, OOM/yr.** Chinese/fringe compute build-out → calibration. 0.5 placeholder (grade C).', math_label='g_{c0}^F', uni_label='g_c0ᶠ', short_name='follower compute growth', cal_target='follower compute grows ~×3.2/yr today'),
+    'g_CF_inf': ParamMeta(interp='**$g_{c\\infty}^F$ — follower compute-growth floor, OOM/yr.** Long-run follower compute growth after slowdown. 0.10 placeholder (grade C/F).', math_label='g_{c\\infty}^F', uni_label='g_c∞ᶠ', short_name='follower compute floor', cal_target='follower long-run compute floor ~×1.26/yr'),
+    'xi_F': ParamMeta(interp='**$\\xi^F$ — follower slowdown decay, per yr.** Decay of $g_c^F(t)$ toward its floor. Scenario knob (grade F).', math_label='\\xi^F', uni_label='ξ_F', short_name='follower slowdown speed', cal_target="how fast the follower's slowdown bites (scenario dial)"),
+    'W0': ParamMeta(interp="**$W_0$ — value at today's frontier, \\$B/yr.** Absolute dollar scale of $W(0)$, reverse-engineered so $\\theta\\,\\Delta W \\approx$ \\$50B matches observed frontier gross profit. NOT independently pinned (grade F, calibration gap #1).", math_label='W_0', uni_label='W₀', short_name='value scale', cal_target='frontier operating profit today ≈ \\$39B/yr', grade='F'),
+    'nu': ParamMeta(interp='**$\\nu$ — value curvature, value-OOMs per capability-OOM.** Base-10 slope of log-value in the exponential regime: each capability OOM multiplies value by $10^{\\nu}$. (0, $\\log_{10} 3$] from per-task token blow-up / cost-intensity; 0.239 = 0.55/ln 10 (grade C; log10 units).', math_label='\\nu', uni_label='ν', short_name='value slope', cal_target='each OOM of capability is worth ~×1.73 more', grade='C'),
+    'phi_RD': ParamMeta(interp='**$\\phi_{RD}$ — R&D markup on compute.** Cost = $(1 + \\phi_{RD})\\cdot$ train-compute flow: staff + experiments on top of the final run. 1.0 ≈ experiments+staff double the final run (grade C).', math_label='\\phi_{RD}', uni_label='φ_RD', short_name='R&D overhead', cal_target='staff + experiments ≈ double the final-run bill', grade='C'),
+    'ell': ParamMeta(interp="**$\\ell$ — training lead time, yr.** How much in advance the next model's compute is bought/trained: the firm pays at $t$ for the compute of the model shipping at $t+\\ell$, so today's bill is $10^{\\,g_{c0}\\ell}\\times$ the current model's (≈ ⟪JUMP⟫× at $\\ell = $ ⟪ELL⟫) — this is what turns the roughly break-even per-model economics of Level 1 into a flow loss. Default 0.5 yr, U[0.25, 1.0] (grade B).", math_label='\\ell', uni_label='ℓ', short_name='training lead time', cal_target="the next model's compute is bought ~6 months ahead", grade='B'),
+    'S0': ParamMeta(interp="**$S_0$ — today's training spend, \\$B/yr.** Combined frontier annual training-compute spend; anchors the cost scale (N3). 40 \\$B/yr (grade C).", math_label='S_0', uni_label='S₀', short_name='training cost today', cal_target='frontier labs spend ~\\$40B/yr on training compute today', grade='C'),
+    'g_p': ParamMeta(interp="**$g_p$ — effective compute-price decline, OOM/yr.** 0.243 = log₁₀(4.2/2.4): chosen so cost growth reproduces Cottier's 2.4×/yr given compute growth 4.2×/yr — prices fall to $10^{-g_p} \\approx 57\\%$ of the year before. Hardware-only price-performance is ~1.35×/yr ($g_p \\approx 0.13$) — the three anchors can't all hold; we keep the two better-measured. Grade B/C; log10 units.", math_label='g_p', uni_label='g_p', short_name='price decline', cal_target='the training bill grows ~×2.4/yr despite ×4.2 compute (prices fall ~43%/yr)', cal_alt='**Tension:** the three cost anchors (Cottier 2.4×/yr, hardware 1.35×/yr, compute 4.2×/yr) are mutually inconsistent — a standing agenda item.', grade='B'),
+    'r': ParamMeta(interp='**$r$ — discount rate, per yr.** Only used by the ownership user-cost extension (II.6); the widget reports **undiscounted** profit flows, not NPV, so $r$ is hidden unless II.6 is on. 0.08 (grade C).', math_label='r', uni_label='r', short_name='discount rate', cal_target='\\$1 next year ≈ \\$0.92 today', grade='C'),
+    'T': ParamMeta(interp='**$T$ — horizon, yr.** The time window every graph uses. Switch between **5 yr** and **10 yr** with the toggle at the top of the sidebar; default 10 yr (the walkthrough horizon). The N5 harvest condition is asymptotic and reported analytically, not plotted beyond 10 yr.', uni_label='T', short_name='horizon'),
+    'delta_total': ParamMeta(math_label='\\delta', uni_label='δ', short_name='catch-up rate', cal_alt='**Alt:** the transient / DeepSeek fast-catch-up reading lives in the MC upper tail (δ ≈ 1.0).'),
+    't_compute_x': ParamMeta(uni_label='compute ×/yr', short_name='compute scaling today'),
+    't_algo_x': ParamMeta(uni_label='algo ×/yr', short_name='algorithmic progress today'),
+    't_lag_mo': ParamMeta(uni_label='lag (mo)', short_name='follower lag'),
+    't_bill_x': ParamMeta(uni_label='bill ×/yr', short_name='training-bill growth today'),
+    't_profit_B': ParamMeta(uni_label='profit₀ $B', short_name='frontier profit today'),
+    't_value_x': ParamMeta(uni_label='value ×/OOM', short_name='value multiplier per OOM'),
+    't_floor_x': ParamMeta(uni_label='floor ×/yr', short_name='long-run compute floor'),
 }
+
+# ---- derived views: the historical dict names, rebuilt from PARAMS. Each omits EXACTLY the keys
+# whose field is None, preserving the original key presence the .get() fallbacks at call sites
+# depend on. INTERP is used as BOTH the slider help= tooltip and the "what does this value mean?"
+# popover; _MATH_LABEL/_UNI_LABEL/_SHORT_NAME are the three label maps; _CAL_TARGET/_CAL_ALT are
+# the calibration captions; GRADES the grounding grades.
+INTERP = {k: v.interp for k, v in PARAMS.items() if v.interp is not None}
+_MATH_LABEL = {k: v.math_label for k, v in PARAMS.items() if v.math_label is not None}
+_UNI_LABEL = {k: v.uni_label for k, v in PARAMS.items() if v.uni_label is not None}
+_SHORT_NAME = {k: v.short_name for k, v in PARAMS.items() if v.short_name is not None}
+_CAL_TARGET = {k: v.cal_target for k, v in PARAMS.items() if v.cal_target is not None}
+_CAL_ALT = {k: v.cal_alt for k, v in PARAMS.items() if v.cal_alt is not None}
+GRADES = {k: v.grade for k, v in PARAMS.items() if v.grade is not None}
 
 # ---- target sliders (D-037): the control IS the observable; the implied parameter renders as a
 #      live caption underneath. One source of truth: bounds/defaults/MC all come from the
@@ -329,49 +315,9 @@ def _sub_live(txt, d):
             txt = txt.replace("⟪" + k + "⟫", v)
     return txt
 
-# ---- calibration content merged into the equations panel (right-hand cards) ----
-# One-line caption per parameter: the observable FACT it is calibrated to, in plain language with
-# its number (Pavel's ruling) — sources and grade letters live in the details popover. For
-# target-driven parameters the caption names the same observable the sidebar slider controls.
-_CAL_TARGET = {
-    "g_C0": "frontier training compute grows ~×4.2/yr",
-    "g_a": "algorithms add ~×2.8/yr of effective compute",
-    "theta": "3–5 competing leaders each keep ≈ 1/(n+1) of the rent",
-    "S0": "frontier labs spend ~\\$40B/yr on training compute today",
-    "ell": "the next model's compute is bought ~6 months ahead",
-    "Delta0": "the follower is ~8 months behind the frontier today",
-    "delta_dev": "keeps the ~8-mo lag constant — the ambient share of the wedge",
-    "delta_rel": "keeps the ~8-mo lag constant — the distillation share of the wedge",
-    "gamma": "how strongly AI-for-AI-R&D compounds (no observable yet)",
-    "rho0": "AI makes AI R&D ~30% faster today",
-    "x_mid": "value stops compounding ~10 OOM above today's frontier",
-    "xi": "how fast the compute slowdown bites (scenario dial)",
-    "g_C_inf": "long-run compute grows only ~×1.35/yr (hardware-only)",
-    "g_a_F": "follower algo progress ≈ 70% of the leader's",
-    "g_CF0": "follower compute grows ~×3.2/yr today",
-    "g_CF_inf": "follower long-run compute floor ~×1.26/yr",
-    "xi_F": "how fast the follower's slowdown bites (scenario dial)",
-    "split": "about half the initial gap is algorithmic, half compute",
-    "nu": "each OOM of capability is worth ~×1.73 more",
-    "g_p": "the training bill grows ~×2.4/yr despite ×4.2 compute (prices fall ~43%/yr)",
-    "phi_RD": "staff + experiments ≈ double the final-run bill",
-    "W0": "frontier operating profit today ≈ \\$39B/yr",
-    "alpha": "experiments-vs-researchers weight in R&D (no observable)",
-    "eta": "how substitutable compute and researchers are in R&D",
-    "r": "\\$1 next year ≈ \\$0.92 today",
-    "tau": "the policy lever itself — chosen, not calibrated",
-}
-# Alternative calibrations / documented tensions, surfaced in the "details" popover.
-_CAL_ALT = {
-    "delta_total": "**Alt:** the transient / DeepSeek fast-catch-up reading lives in the MC upper "
-                   "tail (δ ≈ 1.0).",
-    "theta": "**Alt:** NOT the 60–80% gross margin — that is the Lerner-index trap.",
-    "g_p": "**Tension:** the three cost anchors (Cottier 2.4×/yr, hardware 1.35×/yr, compute "
-           "4.2×/yr) are mutually inconsistent — a standing agenda item.",
-    "x_mid": "**Refs:** 2 = early commoditization · 5 = mid · 10 = harvest continues to the horizon.",
-    "Delta0": "**Note:** benchmark lags are *lower bounds* (benchmaxxing).",
-    "g_C_inf": "**Note:** the hardware-only floor is our extrapolation, not measured.",
-}
+# (_CAL_TARGET — the one-line "observable FACT it is calibrated to" caption per parameter — and
+# _CAL_ALT — alternative calibrations / documented tensions for the details popover — are now
+# derived views over PARAMS (see the registry above), not standalone dicts.)
 
 # ---- calibration sources: the modal's source-picker table now lives in the NOTEBOOK
 # (cell E8b, D-042) as `CAL_SOURCES`, because it also derives the tight default simulation
@@ -386,14 +332,6 @@ _DELTA_MERGED_DOC = ("**$\\delta$ — merged catch-up rate (/yr).** At the base-
                      "Level 6 the follower's own engine covers most of its speed and the two "
                      "channels only close the ~⟪WEDGE⟫ OOM/yr wedge (effective "
                      "$\\delta \\approx$ ⟪DEFF⟫).")
-
-
-# Grounding grades (from Notes/calibration_master.md): A = solid data anchor, B = reasonable
-# anchor, C = judgment / weakly identified, F = free choice or decision variable.
-GRADES = {"g_C0": "A", "g_C_inf": "C", "xi": "F", "g_a": "A", "alpha": "F", "eta": "B",
-          "rho0": "C", "gamma": "C", "Delta0": "A/B", "split": "F", "g_a_F": "B",
-          "delta_dev": "C", "delta_rel": "C", "W0": "F", "nu": "C", "x_mid": "C",
-          "theta": "C", "phi_RD": "C", "ell": "B", "S0": "C", "g_p": "B", "r": "C"}
 
 
 def _fmt_range(rng):
@@ -411,49 +349,6 @@ def _fmt_range(rng):
     if kind == "choice":
         return "choice {" + ", ".join(f"{v:g}" for v in rng[1]) + "}"
     return str(rng)
-
-
-_MATH_LABEL = {"g_C0": "g_{c0}", "g_C_inf": "g_{c\\infty}", "nu": "\\nu", "theta": "\\theta",
-               "S0": "S_0", "g_a": "g_a", "xi": "\\xi", "gamma": "\\gamma", "rho0": "\\rho_0",
-               "x_mid": "x_{mid}", "delta_dev": "\\delta_{dev}", "delta_rel": "\\delta_{rel}",
-               "delta_total": "\\delta",
-               "g_a_F": "g_a^F", "g_CF0": "g_{c0}^F", "g_CF_inf": "g_{c\\infty}^F",
-               "xi_F": "\\xi^F", "Delta0": "\\Delta_0", "split": "\\text{split}", "W0": "W_0",
-               "alpha": "\\alpha", "eta": "\\eta", "phi_RD": "\\phi_{RD}", "ell": "\\ell",
-               "g_p": "g_p", "r": "r"}
-
-# Plain-word short names — shown next to the math symbol wherever raw code names would otherwise
-# leak into the UI (calibration popovers, MC inspector table). Code names appear only in
-# "Under the hood", where the actual code is on display.
-_SHORT_NAME = {"g_C0": "compute growth today", "g_C_inf": "compute-growth floor",
-               "nu": "value slope", "theta": "operating margin", "S0": "training cost today",
-               "g_a": "algo progress today", "xi": "compute slowdown speed",
-               "gamma": "RSI compounding", "rho0": "AI R&D speedup today",
-               "x_mid": "value-curve bend", "delta_dev": "ambient diffusion",
-               "delta_rel": "distillation", "delta_total": "catch-up rate",
-               "g_a_F": "follower algo progress", "g_CF0": "follower compute growth",
-               "g_CF_inf": "follower compute floor", "xi_F": "follower slowdown speed",
-               "Delta0": "initial gap", "split": "algo share of the gap",
-               "W0": "value scale", "alpha": "experiment-compute weight",
-               "eta": "research elasticity", "phi_RD": "R&D overhead",
-               "ell": "training lead time", "g_p": "price decline", "r": "discount rate",
-               "tau": "release delay", "T": "horizon",
-               "t_compute_x": "compute scaling today", "t_algo_x": "algorithmic progress today",
-               "t_lag_mo": "follower lag", "t_bill_x": "training-bill growth today",
-               "t_profit_B": "frontier profit today", "t_value_x": "value multiplier per OOM",
-               "t_floor_x": "long-run compute floor"}
-
-# Unicode math symbols for contexts that can't render LaTeX (st.dataframe).
-_UNI_LABEL = {"g_C0": "g_c0", "g_C_inf": "g_c∞", "nu": "ν", "theta": "θ", "S0": "S₀",
-              "g_a": "g_a", "xi": "ξ", "gamma": "γ", "rho0": "ρ₀", "x_mid": "x_mid",
-              "delta_dev": "δ_dev", "delta_rel": "δ_rel", "delta_total": "δ",
-              "g_a_F": "g_a,F", "g_CF0": "g_c0ᶠ", "g_CF_inf": "g_c∞ᶠ", "xi_F": "ξ_F",
-              "Delta0": "Δ₀", "split": "split", "W0": "W₀", "alpha": "α", "eta": "η",
-              "phi_RD": "φ_RD", "ell": "ℓ", "g_p": "g_p", "r": "r",
-              "tau": "τ", "T": "T",
-              "t_compute_x": "compute ×/yr", "t_algo_x": "algo ×/yr", "t_lag_mo": "lag (mo)",
-              "t_bill_x": "bill ×/yr", "t_profit_B": "profit₀ $B", "t_value_x": "value ×/OOM",
-              "t_floor_x": "floor ×/yr"}
 
 
 def _param_word_label(k):
