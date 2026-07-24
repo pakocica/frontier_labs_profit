@@ -55,12 +55,17 @@ window.FLPTour = (function () {
       eyebrow: "The basic model",
       title: "A lead worth paying for",
       gloss: "The leader pushes the capability frontier; the follower trails a few months behind and gives the same thing away at cost. The leader earns a premium for that gap &mdash; and pays more every year to keep extending it. Whether it profits is a race between those two forces, and the next slides build that race from the ground up.",
-      foot: "Capability is measured in orders of magnitude (OOM) above today's frontier &mdash; today is zero." },
+      foot: "Capability is measured in orders of magnitude (OOM) of effective training compute above today's frontier &mdash; today is zero." },
+
+    { kind: "eq", eyebrow: "01 &middot; The race",
+      title: "One number for capability",
+      eq: [ line(V("x") + S("L") + o("=") + V("c") + S("L") + o("+") + V("a") + S("L")) ],
+      gloss: "Capability <b>x</b> is effective training compute on a log scale: <b>c</b> is log&#8321;&#8320; of physical compute, <b>a</b> is log&#8321;&#8320; of algorithmic progress &mdash; better methods and data. One unit is one order of magnitude (OOM); the scale is anchored so today's frontier sits at zero." },
 
     { kind: "eq", eyebrow: "01 &middot; The race",
       title: "Capability climbs at a steady pace",
       eq: [ line(V("c&#775;") + S("L") + o("=") + V("g") + b("c") + '<span class="amp">and</span>' + V("a&#775;") + S("L") + o("=") + V("g") + b("a")) ],
-      gloss: "The leader's capability rises at a fixed pace each year &mdash; part more compute, part better algorithms. Together the frontier advances &asymp; <b>1.07 OOM/yr</b>, roughly a 12&times; yearly gain in effective compute.",
+      gloss: "Both parts rise at a fixed pace each year. Together the frontier advances &asymp; <b>1.07 OOM/yr</b>, roughly a 12&times; yearly gain in effective compute.",
       params: [
         [V("g") + b("c"), "0.623 OOM/yr", "compute &times;4.2 / yr &mdash; Epoch, several series agree"],
         [V("g") + b("a"), "0.447 OOM/yr", "algorithmic efficiency &times;2.8 / yr, two anchors"]
