@@ -51,9 +51,12 @@ def render():
         c_lab, c_sel, c_info, c_mode = st.columns([0.42, 1.15, 0.22, 2.6],
                                                    vertical_alignment="center")
         # help= here renders the visible desktop tooltip icon next to "Model:" — the selectbox's
-        # own help never shows because its label is collapsed
-        c_lab.markdown("<div class='model-label'>Model:</div>", unsafe_allow_html=True,
-                       help=LEVEL_EXPLAINER)
+        # own help never shows because its label is collapsed. NOTE: the label text must stay
+        # plain markdown — with unsafe_allow_html=True Streamlit leaves the help directive
+        # unparsed and ":help[]" leaks into the page. Styling comes from the container key.
+        with c_lab:
+            with st.container(key="modellabel"):
+                st.markdown("Model:", help=LEVEL_EXPLAINER)
         # the level selector writes st.session_state["level"]; the sidebar reads it (top of run).
         # `help` is the DESKTOP hover tooltip; the ⓘ popover (narrow/phone) carries the same text.
         c_sel.selectbox("Level", LEVEL_LABELS, key="level", label_visibility="collapsed",

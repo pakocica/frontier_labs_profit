@@ -765,7 +765,7 @@ def _layout_css(light):
           html[data-app-mode="phone"] .st-key-topbar [data-testid="stHorizontalBlock"]
             { flex-wrap: wrap !important; }
           .st-key-topbar [data-testid="stColumn"] { min-width: 0 !important; }
-          .st-key-topbar [data-testid="stColumn"]:has(.model-label)
+          .st-key-topbar [data-testid="stColumn"]:has(.st-key-modellabel)
             { flex: 0 0 auto !important; width: auto !important; }
           .st-key-topbar [data-testid="stColumn"]:has([data-testid="stSelectbox"])
             { flex: 0 0 11.5rem !important; width: 11.5rem !important; }
@@ -782,10 +782,9 @@ def _layout_css(light):
              align-items:center anchored the collapsed box at the row mid-line and the real text
              overflowed ~8px BELOW the selectbox centre. Zeroing that margin restores the label's
              true box height so it centres against the ~41px selectbox. */
-          .st-key-topbar [data-testid="stColumn"]:has(.model-label)
-            [data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
-          .st-key-topbar .model-label { text-align: right; font-weight: 600; opacity: 0.8;
-            white-space: nowrap; font-size: 0.95rem; }
+          .st-key-modellabel [data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
+          .st-key-modellabel p { text-align: right; font-weight: 600; opacity: 0.8;
+            white-space: nowrap; font-size: 0.95rem; margin: 0 !important; }
           /* the ⓘ level-explainer popover: hidden on wide (the selectbox tooltip covers it),
              shown on narrow/phone where hover doesn't exist */
           .st-key-levelinfo { display: none; }
