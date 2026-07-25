@@ -8,7 +8,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from .model_access import m
-from .theme import (C_COST, C_GAP, C_GAP_MED, C_PROFIT, C_REV, C_SAMPLE, _rgba)
+from .theme import (C_COST, C_FOLLOWER, C_GAP, C_GAP_MED, C_LEADER, C_PROFIT, C_REV,
+                    C_SAMPLE, _rgba)
 
 # ======================================================================= Monte Carlo (live)
 MC_BATCH = 4           # draws added per heartbeat tick (the component ticks every ~1.2s)
@@ -67,21 +68,47 @@ def _mc_refresh_snapshot(store, show_blowup, show_horizon=True):
     # Two-hue scheme: each panel's bands are light/mid shades of the series' OWN hue; the median
     # is the saturated hue and its color never changes per draw. Gap = derived → grey family;
     # cost shares its identity with the Finance panel (lighter blue, dashed median).
-    CH = [("profit", "Profit flow  Π  ($B/yr)", "$/yr  ($B)", C_PROFIT, C_PROFIT, "solid"),
-          ("Delta", "Capability gap  Δ = xᴸ − xᶠ  (OOM)", "OOM", C_GAP_MED, C_GAP, "solid"),
-          ("revenue", "Revenue  (gap rent, $B/yr)", "$/yr  ($B)", C_REV, C_REV, "solid"),
-          ("cost", "Cost  ($B/yr)", "$/yr  ($B)", C_COST, C_COST, "dash")]
+    # Entry: (key, title, ylab, median color, band hue, median dash, y-axis type).
+    # D-068 MC extension: fans for the Algo progress / Compute / Value tabs ride on the SAME
+    # snapshot — the per-draw records already carry a_L/a_F, c_L/c_F and W_R/W_F (one series
+    # per fan chart, leader vs follower stacked vertically per Pavel's no-side-by-side rule).
+    CH = [("profit", "Profit flow  Π  ($B/yr)", "$/yr  ($B)", C_PROFIT, C_PROFIT, "solid", None),
+          ("Delta", "Capability gap  Δ = xᴸ − xᶠ  (OOM)", "OOM", C_GAP_MED, C_GAP, "solid", None),
+          ("revenue", "Revenue  (gap rent, $B/yr)", "$/yr  ($B)", C_REV, C_REV, "solid", None),
+          ("cost", "Cost  ($B/yr)", "$/yr  ($B)", C_COST, C_COST, "dash", None),
+          ("a_L", "Algo progress — leader  aᴸ", "OOM above 2026 frontier",
+           C_LEADER, C_LEADER, "solid", None),
+          ("a_F", "Algo progress — follower  aᶠ", "OOM above 2026 frontier",
+           C_FOLLOWER, C_FOLLOWER, "solid", None),
+          ("c_L", "Compute — leader (frontier)  cᴸ", "OOM above 2026 frontier",
+           C_LEADER, C_LEADER, "solid", None),
+          ("c_F", "Compute — follower  cᶠ", "OOM above 2026 frontier",
+           C_FOLLOWER, C_FOLLOWER, "solid", None),
+          ("W_R", "Value — leader served  W(xᴿ)  ($B/yr, log)", "$/yr  ($B, log)",
+           C_LEADER, C_LEADER, "solid", "log"),
+          ("W_F", "Value — follower  W(xᶠ)  ($B/yr, log)", "$/yr  ($B, log)",
+           C_FOLLOWER, C_FOLLOWER, "solid", "log")]
     charts = []
-    for key, title, ylab, color, bhue, mdash in CH:
-        A = np.array([dd[key] for dd in draws], float)
+    nan_path = np.full_like(np.asarray(draws[0]["profit"], float), np.nan)
+    for key, title, ylab, color, bhue, mdash, ytype in CH:
+        # .get guard: a store carried across a code reload may hold pre-D-068 records
+        A = np.array([np.asarray(dd.get(key, nan_path), float) for dd in draws])
         A = np.where(np.isfinite(A), A, np.nan)
-        lo5, lo25, med, hi75, hi95 = np.nanpercentile(A, [5, 25, 50, 75, 95], axis=0)
+        if np.isnan(A).all():
+            lo5 = lo25 = med = hi75 = hi95 = nan_path
+        else:
+            lo5, lo25, med, hi75, hi95 = np.nanpercentile(A, [5, 25, 50, 75, 95], axis=0)
         # y-range fits the dark 25-75% band + median (upper-tail draws sit off-frame), as before.
         fin = np.concatenate([lo25[np.isfinite(lo25)], hi75[np.isfinite(hi75)],
                               med[np.isfinite(med)]])
+        if ytype == "log":
+            fin = fin[fin > 0.0]
         if fin.size:
-            span = float(fin.max() - fin.min()) or 1.0
-            yr = [float(fin.min()) - 0.08 * span, float(fin.max()) + 0.08 * span]
+            lo_v, hi_v = float(fin.min()), float(fin.max())
+            if ytype == "log":     # Plotly log-axis ranges are in log10 units
+                lo_v, hi_v = np.log10(lo_v), np.log10(hi_v)
+            span = (hi_v - lo_v) or 1.0
+            yr = [lo_v - 0.08 * span, hi_v + 0.08 * span]
         else:
             yr = [0.0, 1.0]
         if key == "profit":
@@ -89,6 +116,7 @@ def _mc_refresh_snapshot(store, show_blowup, show_horizon=True):
             # no plotted zero line) even when every band is single-signed
             yr = [min(yr[0], 0.0), max(yr[1], 0.0)]
         charts.append(dict(key=key, title=title, ylab=ylab, color=color, mdash=mdash,
+                           ytype=ytype,
                            band_light=_rgba(bhue, 0.12), band_mid=_rgba(bhue, 0.30), yrange=yr,
                            lo5=_rl(lo5), lo25=_rl(lo25), med=_rl(med), hi75=_rl(hi75),
                            hi95=_rl(hi95)))
@@ -138,9 +166,14 @@ def _inspected_params():
 # instance stacks profit, revenue and cost VERTICALLY at full column width — the old
 # revenue|cost row collided titles/axes at narrow widths. The MODEL-PATH instance shows the
 # capability-gap fan. Indices refer to the snapshot's chart list (profit, Delta, revenue,
-# cost — built in _mc_refresh_snapshot).
+# cost, a_L, a_F, c_L, c_F, W_R, W_F — built in _mc_refresh_snapshot). D-068 MC: the extra
+# level-gated tabs reuse the SAME display instance with their own grid.
 FIN_GRID = [[0], [2], [3]]
 PATH_GRID = [[1]]
+ALGO_GRID = [[4], [5]]
+COMP_GRID_L = [[6]]          # < L6: the follower's compute is not modeled yet
+COMP_GRID_BOTH = [[6], [7]]
+VALUE_GRID = [[8], [9]]
 
 
 def _mc_store(mc_key):
@@ -157,7 +190,9 @@ def _mc_payload(store, snap, *, grid, corner, heartbeat, visible):
     sampled = None
     if show:
         dd = store["draws"][i]
-        sampled = {k: _rl(dd[k]) for k in ("profit", "Delta", "revenue", "cost")}
+        sampled = {k: _rl(dd[k]) for k in ("profit", "Delta", "revenue", "cost",
+                                           "a_L", "a_F", "c_L", "c_F", "W_R", "W_F")
+                   if k in dd}
     return dict(t=(snap["t"] if snap else []), charts=(snap["charts"] if snap else []),
                 grid=grid, corner=bool(corner), heartbeat=bool(heartbeat),
                 visible=bool(visible and snap is not None),
@@ -167,21 +202,36 @@ def _mc_payload(store, snap, *, grid, corner, heartbeat, visible):
                 sampled=sampled, idx=int(i), epoch=int(store["epoch"]))
 
 
+# The one-line MC explainer (round 3): the "How to read the Monte-Carlo fans" expander is
+# gone — its content, condensed, lives in the headline's native help tooltip instead.
+_MC_HELP = (
+    "**Share of draws whose profit flow is positive at the horizon $T$.**\n\n"
+    "**How the Monte-Carlo fans work.** Draws accumulate live over the documented sampling "
+    "ranges; each fan shows the **median**, a mid-shade **25–75%** band and a light **5–95%** "
+    "band. Only the dimensions with a documented range at the current level are sampled — "
+    "targets in natural units (inverted per draw), free dials in parameter space; everything "
+    "else stays pinned. Default ranges are tight (the span of the sources); single-source "
+    "dimensions start pinned at a point until you widen them. y-axes fit the mid 25–75% band, "
+    "so extreme upper-tail draws sit off-frame. Bands and this stat refresh only at round draw "
+    f"counts (10, 20, 50, 100) and drawing stops at {MC_CAP}; once done, the **⊙ control** in "
+    "the chart corner steps through inspected draws (dashed ticks on the sidebar range "
+    "controls). Any value, range or mode change restarts the accumulation. Profit is an "
+    "undiscounted yearly flow.")
+
+
 def mc_headline(mc_key, show_blowup=True):
     """The ONE compact stat the Finance tile shows in Monte-Carlo mode (D-047 declutter):
-    the share of draws with positive profit at the horizon T. Frozen at milestone counts
+    'MC simulation: (?) <pct>% profitable at T'. The native help tooltip carries the whole
+    how-to-read explainer (round 3 — it replaced the expander). Frozen at milestone counts
     like the bands; everything else the tile used to show is gone — the graphs carry it."""
     store = _mc_store(mc_key)
     snap = store.get("snapshot") if store else None
     if snap is None:
-        st.info("Starting the Monte-Carlo draws…")   # mc_accumulate owns store creation
+        st.markdown("**MC simulation:** starting the draws…", help=_MC_HELP)
         return
     pct = snap["stats"].get("p_pos_T", float("nan")) * 100.0
     if np.isfinite(pct):
-        st.markdown(f"**{pct:.0f}% of draws profitable at the horizon $T$**",
-                    help="Share of draws whose profit flow is positive at the end of the "
-                         "horizon. Freezes at round draw counts (10, 20, 50, 100) like the "
-                         "bands, so it doesn't flicker while drawing.")
+        st.markdown(f"**MC simulation:** {pct:.0f}% profitable at $T$", help=_MC_HELP)
 
 
 def mc_panel_fin(mc_key, visible, show_blowup=True):
@@ -215,15 +265,17 @@ def mc_panel_fin(mc_key, visible, show_blowup=True):
     return False
 
 
-def mc_panel_path(mc_key):
-    """The model-path panel instance (capability-gap fan): display only — no corner UI, no
-    heartbeat, mounted only while the Monte-Carlo mode is visible."""
+def mc_panel_path(mc_key, grid=PATH_GRID):
+    """The display-only panel instance (no corner UI, no heartbeat), mounted only while the
+    Monte-Carlo mode is visible. One tab shows at a time, so every non-finance tab reuses this
+    SAME instance with its own `grid` — the capability-gap fan (default), or the D-068 fans
+    (ALGO_GRID / COMP_GRID_* / VALUE_GRID); a grid change rebuilds the chart divs in place."""
     store = _mc_store(mc_key)
     snap = store.get("snapshot") if store else None
     if snap is None:
         st.info("Starting the Monte-Carlo draws…")
         return
-    _MC_PANEL(data=_mc_payload(store, snap, grid=PATH_GRID, corner=False, heartbeat=False,
+    _MC_PANEL(data=_mc_payload(store, snap, grid=grid, corner=False, heartbeat=False,
                                visible=True),
               key="mc_panel_path", default=None)
 

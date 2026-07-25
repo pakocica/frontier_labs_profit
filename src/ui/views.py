@@ -24,7 +24,8 @@ from . import calpanel, theme
 from .content import GRADES, NOTATION_SECTIONS
 from .equations import equations_panel
 from .levels import level_card
-from .mc import (MC_CAP, mc_accumulate, mc_headline, mc_panel_fin, mc_panel_path, mc_prepare)
+from .mc import (ALGO_GRID, COMP_GRID_BOTH, COMP_GRID_L, VALUE_GRID, mc_accumulate,
+                 mc_headline, mc_panel_fin, mc_panel_path, mc_prepare)
 from .model_access import NB, m
 from .simcache import delay_cached, sim_window_cached
 from .state import _reg, cal_open, close_cal, mc_active
@@ -160,34 +161,42 @@ def _capability_tile(d, sim, LEVEL, mode_mc, mc_key):
         show(f, key="pt_gap")
 
 
-def _algo_tile(sim):
+def _algo_tile(sim, mode_mc=False, mc_key=None):
     """Algorithmic-progress paths a(t) — its own tab from L3 (D-068: moved out of Capability,
     where it crowded the gap graph). Both actors, unchanged data: catch-up flows through the
-    algorithmic channel, so the follower's a can overtake the leader's while its total x trails."""
+    algorithmic channel, so the follower's a can overtake the leader's while its total x trails.
+    Monte-Carlo mode shows the leader/follower a(t) fans (same snapshot, own grid)."""
     with st.container(border=False):
-        f = fig_base("Algorithmic progress — leader vs follower  a(t)", "year",
-                     "OOM above 2026 frontier", height=230)
-        line(f, sim["t"], sim["a_L"], "leader  aᴸ", C_LEADER)
-        line(f, sim["t"], sim["a_F"], "follower  aᶠ", C_FOLLOWER)
-        show(f, key="pt_algo")
+        if mode_mc:
+            mc_panel_path(mc_key, grid=ALGO_GRID)
+        else:
+            f = fig_base("Algorithmic progress — leader vs follower  a(t)", "year",
+                         "OOM above 2026 frontier", height=230)
+            line(f, sim["t"], sim["a_L"], "leader  aᴸ", C_LEADER)
+            line(f, sim["t"], sim["a_F"], "follower  aᶠ", C_FOLLOWER)
+            show(f, key="pt_algo")
         st.caption("Catch-up flows through the *algorithmic* channel, so the follower's $a$ can "
                    "overtake the leader's $a$ while its total capability $x$ still trails — the "
                    "compute deficit is what keeps the gap open.")
 
 
-def _compute_tile(sim, LEVEL):
+def _compute_tile(sim, LEVEL, mode_mc=False, mc_key=None):
     """Compute paths c(t) — its own tab from L4 (D-068). The follower's compute is NOT modeled
     before L6, so L4–L5 plots ONLY the leader's frontier compute; L6 (catch-up channels) adds
-    the follower's compute line alongside the leader's (Pavel's explicit instruction)."""
+    the follower's compute line alongside the leader's (Pavel's explicit instruction).
+    Monte-Carlo mode shows the compute fan(s) — same level gating for the follower's."""
     both = LEVEL >= 6
     with st.container(border=False):
-        ttl = ("Compute — leader vs follower  c(t)" if both
-               else "Compute — leader (frontier)  c(t)")
-        f = fig_base(ttl, "year", "OOM above 2026 frontier", height=230)
-        line(f, sim["t"], sim["c_L"], "leader  cᴸ", C_LEADER)
-        if both:
-            line(f, sim["t"], sim["c_F"], "follower  cᶠ", C_FOLLOWER)
-        show(f, key="pt_comp")
+        if mode_mc:
+            mc_panel_path(mc_key, grid=COMP_GRID_BOTH if both else COMP_GRID_L)
+        else:
+            ttl = ("Compute — leader vs follower  c(t)" if both
+                   else "Compute — leader (frontier)  c(t)")
+            f = fig_base(ttl, "year", "OOM above 2026 frontier", height=230)
+            line(f, sim["t"], sim["c_L"], "leader  cᴸ", C_LEADER)
+            if both:
+                line(f, sim["t"], sim["c_F"], "follower  cᶠ", C_FOLLOWER)
+            show(f, key="pt_comp")
         st.caption(
             "Compute is the capital-intensive engine behind capability. "
             + ("The follower's own compute enters the model at this level, plotted alongside "
@@ -196,7 +205,7 @@ def _compute_tile(sim, LEVEL):
                     "level (6); here only the leader's frontier compute is shown."))
 
 
-def _value_tile(sim):
+def _value_tile(sim, mode_mc=False, mc_key=None):
     """Value flows W over the horizon — its own tab from L5 (D-068). LOG y-axis: W(x) grows
     ~exponentially with capability, so on a log scale the value levels read off as slopes.
     x-axis is the horizon (year) — the quantity the model exposes cleanly (W_R, W_F are already
@@ -204,12 +213,15 @@ def _value_tile(sim):
     lines are the served-leader value W(xᴿ) and the follower value W(xᶠ), whose gap the leader
     earns rent on."""
     with st.container(border=False):
-        f = fig_base("Value over time — leader served vs follower  W  ($B/yr, log)",
-                     "year", "$/yr  ($B, log scale)", height=230)
-        line(f, sim["t"], sim["W_R"], "leader served  W(xᴿ)", C_LEADER)
-        line(f, sim["t"], sim["W_F"], "follower  W(xᶠ)", C_FOLLOWER)
-        f.update_yaxes(type="log")
-        show(f, key="pt_value")
+        if mode_mc:
+            mc_panel_path(mc_key, grid=VALUE_GRID)
+        else:
+            f = fig_base("Value over time — leader served vs follower  W  ($B/yr, log)",
+                         "year", "$/yr  ($B, log scale)", height=230)
+            line(f, sim["t"], sim["W_R"], "leader served  W(xᴿ)", C_LEADER)
+            line(f, sim["t"], sim["W_F"], "follower  W(xᶠ)", C_FOLLOWER)
+            f.update_yaxes(type="log")
+            show(f, key="pt_value")
         st.caption("Each actor's capability commands a dollar value $W(x)$ (\\$B/yr); the leader "
                    "earns rent on the **gap** $W(x^R) - W(x^F)$ between the two lines. Log "
                    "y-axis: near-exponential value growth reads as straight-line slopes.")
@@ -360,22 +372,8 @@ def _charts_column(d, items, sim, hl, p, LEVEL, mode_mc, mc_key, sample_keys):
         st.session_state["_charts_tab_mem"] = tab
         fin_vis = tab == "Financial"
         _warnings(sim, LEVEL)
-        if mode_mc:
-            with st.expander("How to read the Monte-Carlo fans", expanded=False):
-                st.markdown(
-                    "Draws accumulate live across the sampling ranges and are summarised as a "
-                    "**median line with a mid-shade 25–75% band and a light 5–95% band**. At "
-                    f"**Level {LEVEL}** the **{len(sample_keys)}** dimension(s) with a "
-                    "documented range are sampled — targets in natural units (inverted per "
-                    "draw), free dials in parameter space; everything else is pinned at its "
-                    "current value. **Default sampling ranges are tight** (the span of the "
-                    "documented sources); single-source dimensions start **pinned at a point** "
-                    "until you widen their range. y-axes fit the mid 25–75% band, so extreme "
-                    "upper-tail draws sit off-frame. Bands and stats **refresh only at round "
-                    f"draw counts** (10, 20, 50, 100); drawing stops at {MC_CAP}. Once done, "
-                    "the **⊙ control** in the finance panel's corner steps through inspected "
-                    "draws (dashed ticks on the sidebar range controls). Any value/range/mode "
-                    "change restarts the accumulation. Profit is an undiscounted yearly flow.")
+        # (round 3) the "How to read the Monte-Carlo fans" expander is gone — its content
+        # lives in the MC headline's help tooltip (mc_headline / _MC_HELP in ui/mc.py).
         need_rerun = False
         if fin_vis:
             need_rerun = _finance_tile(d, sim, hl, LEVEL, mode_mc, mc_key)
@@ -386,11 +384,11 @@ def _charts_column(d, items, sim, hl, p, LEVEL, mode_mc, mc_key, sample_keys):
         elif tab == "Capability":
             _capability_tile(d, sim, LEVEL, mode_mc, mc_key)
         elif tab == "Algo progress":
-            _algo_tile(sim)                       # point paths (no MC fan for a(t))
+            _algo_tile(sim, mode_mc, mc_key)      # point paths or a(t) fans
         elif tab == "Compute":
-            _compute_tile(sim, LEVEL)             # leader only < L6; +follower at L6
+            _compute_tile(sim, LEVEL, mode_mc, mc_key)  # leader only < L6; +follower at L6
         elif tab == "Value":
-            _value_tile(sim)                      # W over the horizon, log y-axis
+            _value_tile(sim, mode_mc, mc_key)     # W over the horizon, log y-axis
         if not (mode_mc and fin_vis):
             # CRITICAL invariant: exactly ONE finance-component mount per run. It is visible
             # only on (MC mode ∧ Finance tab); in every other state it mounts HIDDEN so its

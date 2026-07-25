@@ -45,10 +45,11 @@ def render(LEVEL):
         st.session_state[mkey] = _range_mode(ekey)                                # pre-inst sync
         return container.checkbox("range mode", key=mkey, label_visibility="collapsed",
                                   on_change=_commit_mode, args=(ekey,),
-                                  help="Ticked: **range mode** — the Monte Carlo samples this range; "
-                                       "the deterministic paths use the spot value. Unticked: **spot "
-                                       "mode** — this exact value is used everywhere and the Monte "
-                                       "Carlo pins the dimension.")
+                                  help="**Sample this parameter in the Monte Carlo?** Ticked: the "
+                                       "draws sweep the sampling range you set here (the "
+                                       "deterministic paths keep using the spot value — the ghost "
+                                       "bullet on the track). Unticked: every draw pins it at the "
+                                       "spot value.")
 
     def _range_control(container, ekey, label, fmt=None):
         """Two-ended MC sampling-range slider bounded by the vetted ENVELOPE, starting at the tight
@@ -122,17 +123,22 @@ def render(LEVEL):
                 "pointer-events:none;'>" + "".join(parts) + "</div>",
                 unsafe_allow_html=True)
 
-    def _row_head(row, label, val_txt, panel_key, pinned=False):
-        """Line 1 of a compact 3-line sidebar row (D-043): label + current value + a small ⓘ
-        at the far right that opens the docked calibration panel (replaces the old full-width
-        interpretation popover / [details] button)."""
-        # label gets ~73% of the row (values are short); one line per label is the S7 contract
-        lc, vc, ic = row.columns([7.2, 1.6, 1.0], vertical_alignment="center")
-        lc.markdown(label)
+    def _row_head(row, label, val_txt, panel_key, pinned=False, tip=None):
+        """Line 1 of a compact 3-line sidebar row (D-043): label (with a native (?) explanation
+        tooltip — what the parameter is, its units, why the default) + current value + a small »
+        at the far right that opens the docked calibration panel (the » replaced the old ⓘ, which
+        now means 'explanation' everywhere in the app). Column ratios total 7 to MATCH the slider
+        row below ([6, 1]), so the value's right edge lands on the slider track's right edge
+        (first two columns sum to 6; the one extra inter-column gap costs ~g/7 ≈ 2px)."""
+        # The » renders as a direct row child; CSS (theme.py, "cal rail") absolutely positions it
+        # as a TALL THIN BUTTON on the very right edge of the whole parameter block (Pavel,
+        # round 3) — out of flow, so the label/value/slider grid is untouched by it.
+        row.button("»", key=f"i_{panel_key}", on_click=open_cal, args=(panel_key, pinned),
+                   help="Open detailed calibration — sources, ranges, methodology")
+        lc, vc = row.columns([4.9, 1.7], vertical_alignment="center")
+        lc.markdown(label, help=tip)
         vc.markdown(f"<div style='text-align:right;font-size:0.85rem;opacity:0.85;"
                     f"white-space:nowrap'>{val_txt}</div>", unsafe_allow_html=True)
-        ic.button("ⓘ", key=f"i_{panel_key}", on_click=open_cal, args=(panel_key, pinned),
-                  help="calibration details — sources, ranges, methodology")
 
     def _param(container, key, label, lo, hi, step, **kw):
         """Compact 3-line row (D-043): label+value+ⓘ, keyed slider (collapsed label) with a
@@ -157,10 +163,18 @@ def render(LEVEL):
             _reg(wkey, float(np.clip(S.get(f"sv_{key}", default), lo, hi)))
         row = container.container(key=f"row_{key}")
         cur = st.session_state.get(wkey, st.session_state.get(f"sv_{key}", default))
-        _row_head(row, label, f"{float(cur):g}", key)
         dual = sampled and MC_ACTIVE        # dual-mode UI renders only in Monte-Carlo mode
-        cols = [5.3, 0.55, 1.0] if dual else [6, 1]
-        cs = row.columns(cols, vertical_alignment="bottom")
+        # range mode shows the SELECTED SAMPLING RANGE in the value slot (a spot number there
+        # would be misleading — Pavel); the spot lives on the track's ghost bullet instead
+        if dual and _range_mode(key) and _mc_dim_editable(key):
+            _rl, _rh = _active_span(key)
+            _vt = f"{float(_rl):g}–{float(_rh):g}"
+        else:
+            _vt = f"{float(cur):g}"
+        _row_head(row, label, _vt, key, tip=interp)
+        # dual totals 7 like the spot row, so the ↺ column sits at the same x in both modes
+        cols = [6.05, 0.55, 0.4] if dual else [6.6, 0.4]
+        cs = row.columns(cols, vertical_alignment="center")
         sc, rc = cs[0], cs[-1]
         rmode = _mode_tick(cs[1], key) if dual else False
         if dual and rmode and _mc_dim_editable(key):
@@ -202,9 +216,14 @@ def render(LEVEL):
         st.session_state.setdefault("_wdefaults", {})[wkey] = default   # ↺ / Reset-all target
         row = container.container(key=f"row_{tkey}")
         cur = st.session_state.get(wkey, st.session_state.get(f"sv_{tkey}", default))
-        _row_head(row, label, fmt % float(cur), panel_key)
-        cols = [5.3, 0.55, 1.0] if MC_ACTIVE else [6, 1]
-        cs = row.columns(cols, vertical_alignment="bottom")
+        if MC_ACTIVE and _range_mode(tkey):
+            _rl, _rh = _active_span(tkey)
+            _vt = f"{fmt % float(_rl)}–{fmt % float(_rh)}"
+        else:
+            _vt = fmt % float(cur)
+        _row_head(row, label, _vt, panel_key, tip=INTERP_T.get(tkey))
+        cols = [6.05, 0.55, 0.4] if MC_ACTIVE else [6.6, 0.4]
+        cs = row.columns(cols, vertical_alignment="center")
         rmode = _mode_tick(cs[1], tkey) if MC_ACTIVE else False
         if rmode:
             st.session_state[f"_spoton_{tkey}"] = False
@@ -245,15 +264,21 @@ def render(LEVEL):
             row.caption(capfn(d[pkey]))
 
     # ---- sidebar body ----------------------------------------------------------------
-    # D-050: the panel is titled by what it HOLDS (parameter controls); the orientation
-    # prose folds away in a default-collapsed expander (Pavel). D-054 (round 2): the expander
-    # is titled by its CONTENT — it explains how the controls/observables work, not assumptions.
-    st.sidebar.title("Parameters")
-    with st.sidebar.expander("How the controls work", expanded=False):
-        st.caption(f"**Level {LEVEL}** — the controls are **observables** where one exists; the "
-                   "small caption under each shows the implied parameter live. Dials without a "
-                   "clean observable sit under *Model internals*. Raise the level (top of the "
-                   "page) to add the next mechanism. Defaults are provisional → calibration.")
+    # D-050: the panel is titled by what it HOLDS (parameter controls). The control-orientation
+    # prose now rides a native help= tooltip on the title (replacing the D-054 expander, which
+    # was outdated) — one affordance pattern across the app.
+    # The compact "Reset ↺" control sits to the RIGHT of the title (replacing the old full-width
+    # "↺ Reset all to defaults" button) and reuses the same reset-all logic.
+    _tc, _rc = st.sidebar.columns([4.4, 1.6], vertical_alignment="bottom")
+    _tc.title(
+        "Parameters",
+        help="These controls set the observables and parameters of the model level you picked "
+             "above. Where a clean observable exists the control is in natural units and the "
+             "caption beneath shows the implied parameter live; dials without one sit under "
+             "*Model internals*. Defaults are the calibrated values — **Reset ↺** restores "
+             "them.")
+    _rc.button("Reset ↺", key="resetall_btn", on_click=_reset_all,
+               help="Restore all controls to their calibrated defaults.")
 
 
     # The reset registry is rebuilt from scratch each run, so it always lists exactly the controls the
@@ -273,12 +298,13 @@ def render(LEVEL):
         S["_all_params_mem"] = bool(show_all_params)
         if show_all_params:
             allowed = None
-    st.sidebar.button("↺ Reset all to defaults", use_container_width=True, on_click=_reset_all,
-                      help="Return every visible control to its notebook default.")
-
     # -------------------------------------------------- global horizon (applies to EVERY graph)
-    _hz = st.sidebar.segmented_control("Horizon — applies to all graphs", ["5 yr", "10 yr"],
-                                       key=_reg("w_hz", "10 yr"), help=INTERP["T"])
+    # ONE line: plain "Horizon" label (the "applies to all graphs" detail rides its tooltip,
+    # with the full INTERP text) + the 5/10-yr switch beside it.
+    _hl, _hc = st.sidebar.columns([2.4, 4.6], vertical_alignment="center")
+    _hl.markdown("Horizon", help="Applies to **all** graphs. " + INTERP["T"])
+    _hz = _hc.segmented_control("Horizon", ["5 yr", "10 yr"],
+                                key=_reg("w_hz", "10 yr"), label_visibility="collapsed")
     d["T"] = 5.0 if _hz == "5 yr" else 10.0  # None (deselected) falls back to 10 yr
 
     sb = st.sidebar
@@ -394,8 +420,9 @@ def render(LEVEL):
             _twk = _reg("w_tau_mo", _tau_def)
             _trow = sb.container(key="row_tau")
             _row_head(_trow, "$\\tau$  release delay (months)",
-                      f"{int(st.session_state.get(_twk, _tau_def))} mo", "tau")
-            _tsc, _trc = _trow.columns([6, 1], vertical_alignment="bottom")
+                      f"{int(st.session_state.get(_twk, _tau_def))} mo", "tau",
+                      tip=INTERP["tau"])
+            _tsc, _trc = _trow.columns([6.6, 0.4], vertical_alignment="center")
             tau_mo = _tsc.slider("$\\tau$  release delay (months)", 0, 3, step=1, key=_twk,
                                  help=INTERP["tau"], label_visibility="collapsed")
             _trc.button("↺", key="r_tau", help="reset to default", on_click=_reset_one,
@@ -475,8 +502,9 @@ def render(LEVEL):
                                "min (Leontief)" if P0.leontief else eta_options[0])
             _erow = c.container(key="row_eta")
             _row_head(_erow, "$\\eta$  CES exponent (compute–labor)",
-                      str(st.session_state.get("w_eta", eta_default)).split(" ")[0], "eta")
-            ec1, ec2 = _erow.columns([5.3, 0.55], vertical_alignment="bottom")
+                      str(st.session_state.get("w_eta", eta_default)).split(" ")[0], "eta",
+                      tip=INTERP.get("eta"))
+            ec1, ec2 = _erow.columns([6.05, 0.55], vertical_alignment="center")
             eta_choice = ec1.selectbox("$\\eta$  CES exponent (compute–labor substitution)",
                                        eta_options, key=_reg("w_eta", eta_default),
                                        help=INTERP.get("eta"), label_visibility="collapsed")

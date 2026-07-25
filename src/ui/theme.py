@@ -262,58 +262,29 @@ _D050_JS = r"""
   function defW() { return Math.round(PWREM * curFont); }   /* rem-derived default panel width */
   applyFont();
 
-  /* (D-051) graph-height system: the two stacked charts should fill most of the panel height.
-     Each Plotly chart height = clamp(150, min(width × aspect, per-chart vertical fill), 560) —
-     drag the panel narrower and they shorten; widen it and the height caps at the fill budget so
-     only the width grows. Driven client-side via the parent page's Plotly (relayout); debounced,
-     and a no-op when the height already matches so MC in-place updates don't thrash. Works for
-     the right column AND the narrow/phone overlay (same .st-key-chartscol charts). */
-  var CHART_ASPECT = 1.0, CHART_CHROME = 210, CHART_MIN = 150, CHART_MAX = 560, _szT = 0;
+  /* Graph-height reconciler (Pavel 2026-07-24, replaces the D-051/D-054/D-068 dynamic sizer).
+     The chart height is now ONE standard value for every chart, tab and mode, set purely in CSS
+     (:root --chart-h, a clamp off 100vh sized so THREE stacked charts fit the panel) — the shim
+     never writes --chart-h any more. The old measured-fill writer raced Streamlit on resize: a
+     freshly written (smaller) --chart-h shrank the chart CONTAINERS while the mounted Plotly
+     plots kept their render-time height, so plots overflowed their tiles and drew over the next
+     chart (Pavel's overlapping-graphs report). What remains here is reconciliation only: when a
+     mounted plot's height disagrees with its (CSS-sized) container — e.g. after a window-height
+     resize changed the vh-derived value — explicitly Plotly-resize it to the container. */
+  var _szT = 0;
   function sizeCharts() {
     var col = d.querySelector('.st-key-chartscol');
     if (!col) return;
-    var cw = col.getBoundingClientRect().width - 24;   /* minus the panel's horizontal padding */
-    if (cw <= 0) return;                                /* hidden (narrow, overlay closed) → skip */
-    /* (D-054, revised) the per-chart vertical budget = the column's VISIBLE height minus the
-       chrome above the first chart, the inter-chart gaps and the bottom padding (footer
-       clearance), split across n charts. Every term is measured from element POSITIONS, not from
-       chart heights, so the budget is INDEPENDENT of --chart-h and cannot feed back / thrash.
-       (D-056) The chrome above the first chart is measured as its offset within the column's
-       scrollable CONTENT (rect-top − column-top + scrollTop), NOT its raw viewport top — the
-       panel scrolls internally (overflow-y:auto), and using the viewport top made the fitted
-       height GROW as you scrolled down (first.top shrank). This form is scroll-invariant. */
-    var charts = col.querySelectorAll('[data-testid="stPlotlyChart"]');
-    /* (D-068) height cap for single-graph tabs: divide the vertical fill budget by AT LEAST 2, so
-       a lone-graph tab (Algo progress / Compute L4-5 / Value) matches the Financial tab's
-       per-graph height instead of ballooning to fill the whole panel (Pavel's height rule). The
-       :root --chart-h CSS default already divides by 2, so this keeps the shim consistent with it.
-       Multi-graph tabs are unaffected (charts.length >= 2 there). */
-    var n = Math.max(2, charts.length);
-    var fill;
-    if (charts.length) {
-      var colRect = col.getBoundingClientRect();
-      var first = charts[0].getBoundingClientRect();
-      var gap = 0;
-      if (charts.length > 1)                            /* flex row-gap, invariant to chart height */
-        gap = Math.max(0, charts[1].getBoundingClientRect().top - charts[0].getBoundingClientRect().bottom);
-      var padB = parseFloat(w.getComputedStyle(col).paddingBottom) || 0;
-      var chromeAbove = (first.top - colRect.top) + col.scrollTop;   /* scroll-invariant */
-      var colTopVP = Math.max(0, colRect.top);          /* 0 wide, ~6.5rem in the overlay */
-      fill = (w.innerHeight - colTopVP - chromeAbove - (n - 1) * gap - padB - 6) / n;   /* −6 safety */
-    } else {
-      fill = (w.innerHeight - Math.max(0, col.getBoundingClientRect().top) - CHART_CHROME) / n;
-    }
-    var h = Math.round(Math.max(CHART_MIN, Math.min(Math.min(cw * CHART_ASPECT, fill), CHART_MAX)));
-    if (R.style.getPropertyValue('--chart-h') !== h + 'px') {
-      R.style.setProperty('--chart-h', h + 'px');
-      poke(); w.setTimeout(poke, 280);                  /* nudge Plotly to re-fit (twice: the
-                                                           container height needs a frame to apply
-                                                           before the plot settles to it) */
-    }
+    if (col.getBoundingClientRect().width <= 0) return; /* hidden (narrow, overlay closed) */
+    var mismatch = false;
+    col.querySelectorAll('[data-testid="stPlotlyChart"]').forEach(function (cont) {
+      var plot = cont.querySelector('.js-plotly-plot');
+      if (plot && Math.abs(plot.offsetHeight - cont.clientHeight) > 2) mismatch = true;
+    });
     /* (D-054) while the Graphs OVERLAY is showing, always re-fit explicitly: the CSS-only
        show/hide fires no resize Plotly notices, and a chart-group switch or MC re-render
        remounts plots at the stale narrow width. Debounced by sizeChartsSoon upstream. */
-    if (R.getAttribute('data-graphs-open') === '1') plotlyFitSoon();
+    if (mismatch || R.getAttribute('data-graphs-open') === '1') plotlyFitSoon();
   }
   function sizeChartsSoon() { if (_szT) w.clearTimeout(_szT); _szT = w.setTimeout(sizeCharts, 90); }
 
@@ -546,6 +517,37 @@ _D050_JS = r"""
     if (os) R.setAttribute('data-sb-hover', '1'); else R.removeAttribute('data-sb-hover');
   });
 
+  /* the MC range/spot tick needs a visible hover explanation: its help= tooltip can NOT render
+     (collapsed label -> the whole stWidgetLabel incl. the tooltip icon is display:none,
+     verified live) and a native title on the label proved unreliable on macOS. So: a tiny
+     in-DOM tip, DELEGATED like the eq-hover listener, shown while the pointer is over any
+     st-key-rm_ tick; pointer-events:none so it never intercepts the click. */
+  function tickTip() {
+    var t = d.getElementById('tickTip');
+    if (!t) {
+      t = d.createElement('div'); t.id = 'tickTip';
+      t.textContent = 'Sample this parameter in the Monte Carlo? Ticked: the draws sweep ' +
+        'the sampling range set here (the deterministic paths keep the spot value). ' +
+        'Unticked: every draw pins it at the spot value.';
+      d.body.appendChild(t);
+    }
+    return t;
+  }
+  on(d, 'mouseover', function (e) {
+    var t = e.target; if (!t || !t.closest) return;
+    var host = t.closest('[class*="st-key-rm_"]');
+    var tip = tickTip();
+    if (!host) { tip.style.display = 'none'; return; }
+    var r = host.getBoundingClientRect();
+    tip.style.display = 'block';
+    tip.style.top = (r.bottom + 8) + 'px';
+    tip.style.left = Math.max(8, r.right - 280) + 'px';
+    /* safety: mouseover only fires on target CHANGES, so a resting pointer could leave a
+       stale tip up — auto-hide caps it */
+    if (w.__tickTipT) w.clearTimeout(w.__tickTipT);
+    w.__tickTipT = w.setTimeout(function () { tip.style.display = 'none'; }, 5000);
+  });
+
   /* (D-055) equations→parameters HOVER highlight — desktop only, DELEGATED (one listener) so it
      survives reruns and shim reinstalls with no per-node bookkeeping. Hovering an equations
      subsection (.st-key-eqsub_*) reads its hidden .eqhl-src marker (the mapped sidebar row keys)
@@ -665,11 +667,22 @@ def _layout_css(light):
           html[data-sb-collapsed] section[data-testid="stSidebar"] { display: none; }
           /* (D-053) drop the dead air above the "Parameters" title: the sidebar header strip
              collapses to its buttons and the user content loses its ~6rem top padding */
+          /* top padding lines the "Parameters" title up with the main title bar's top edge
+             (block-container padding 4.5rem is the shared reference; the charts panel matches
+             it too — round 3: the unified offset shrank 7.2rem → 4.5rem, see the dead-gap
+             removal at the block container). The native sidebar HEADER strip is fully hidden —
+             its only content (collapse button, resize handle) was already suppressed by D-050,
+             yet the empty strip still ate ~3.75rem + a flex gap at the top. */
           section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"]
-            { padding-top: 0.8rem; padding-bottom: 2.4rem; /* clears the full-width footer */ }
+            { padding-top: 4.45rem; padding-right: 0.9rem;
+              padding-bottom: 2.4rem; /* clears the full-width footer */ }
           section[data-testid="stSidebar"] [data-testid="stSidebarHeader"]
-            { padding-top: 0.4rem; padding-bottom: 0; min-height: 0; }
+            { display: none; }
           section[data-testid="stSidebar"] h1 { padding-top: 0; }
+          /* the scroll container's default 1.25rem right padding was dead space next to the
+             » rail — trim it (the overlay scrollbar paints over padding anyway) */
+          section[data-testid="stSidebar"] [data-testid="stSidebarContent"]
+            { padding-right: 0.4rem; }
 
           /* frozen top bar. Streamlit wraps every element in a stLayoutWrapper exactly its
              own height, so `sticky` must go on the WRAPPER (a sticky child of a same-height
@@ -686,7 +699,22 @@ def _layout_css(light):
              the horizontal padding drops Streamlit's 5rem default (an 80px void between the
              sidebar and the content) to a normal gutter */
           [data-testid="stMainBlockContainer"]
-            { padding: 4.2rem 1.5rem 1rem 1.5rem; }
+            { padding: 4.5rem 1.5rem 1rem 1.5rem; }
+          /* (round 3) reclaim the dead air above the title bar: the top-level vertical block
+             holds several ZERO-HEIGHT service rows before .st-key-apptitle (CSS-injection
+             markdown containers and the 0-height shim iframe), and each one costs a full
+             1rem flex gap — ~4rem of nothing pushing all content down. The anonymous
+             zero-visual rows are display:none'd (their <style> payloads still apply); the shim
+             iframe row must STAY rendered (display:none could suspend its JS on some engines),
+             so its wrapper instead carries a -1rem margin that cancels exactly the one gap it
+             adds. Title-bar top = the block padding again: 4.5rem, ~0.75rem under the header. */
+          [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"]
+            > [data-testid="stElementContainer"]:not(:has(iframe)) { display: none; }
+          [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"]
+            > [data-testid="stLayoutWrapper"]:has(> .st-key-fejs),
+          [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"]
+            > [data-testid="stElementContainer"]:has(iframe)
+            { margin-top: -1rem; margin-bottom: 0; }
 
           /* ---- D-047 main region: [cal panel + fold strip (when open) | middle pane (flex)]
              | right chart panel (fixed, drag-collapsible). Rows must NOT wrap — a percentage
@@ -710,7 +738,9 @@ def _layout_css(light):
             height: 100vh; overflow-y: auto; overflow-x: hidden; z-index: 99;
             background-color: __PANEL_BG__;
             border-left: 1px solid rgba(128,128,128,0.2);
-            padding: 2.3rem 0.7rem 2.4rem; /* bottom clears the full-width footer (D-053) */ }
+            padding: 4.5rem 0.7rem 2.4rem; /* top: the unified column-top offset (round 3 —
+              equals the block-container padding now that the dead gaps above the title bar are
+              gone) so all three column tops start level; bottom clears the footer (D-053) */ }
           html[data-charts-collapsed] .st-key-chartscol { display: none; }
           [data-testid="stColumn"]:has(.st-key-chartscol) {
             flex: 0 0 calc(var(--charts-w) - __GUTTER__) !important;
@@ -915,6 +945,12 @@ def _layout_css(light):
              rest; both target rows BY CLASS (not a JS-toggled node class) so they survive the
              background-MC reruns. Desktop only — the shim skips it in phone mode / on non-hover
              pointers. Mirrors the click-era calibration-emphasis look. */
+          /* the shim's in-DOM tooltip for the MC range/spot tick (its help= cannot render) */
+          #tickTip { display: none; position: fixed; z-index: 999999; max-width: 280px;
+            background: __TOPBAR_BG__; color: __TX__;
+            border: 1px solid rgba(128,128,128,0.4); border-radius: 8px;
+            padding: 0.45rem 0.6rem; font-size: 0.78rem; line-height: 1.35;
+            pointer-events: none; box-shadow: 0 4px 18px rgba(0,0,0,0.35); }
           .eqhl-src { display: none; }
           html[data-eqhover="1"] section[data-testid="stSidebar"] [class*="st-key-row_"]
             { opacity: 0.4; }
@@ -935,7 +971,48 @@ def _layout_css(light):
             [data-testid="stMarkdownContainer"] p { font-size: 0.92rem; }
           section[data-testid="stSidebar"] [class*="st-key-row_"]
             [data-testid="stCaptionContainer"] p { font-size: 0.78rem; }
-          /* the tiny ⓘ (and per-row ↺): strip the button chrome down to a glyph */
+          /* per-row ↺: level with the slider (center-aligned columns) and pulled in toward the
+             track's right edge — the column gap alone left it hanging too far right (Pavel).
+             [class*="st-key-r_"] needs the literal "st-key-r_" so row_/rm_/srng_ keys don't match. */
+          section[data-testid="stSidebar"] [class*="st-key-row_"] [class*="st-key-r_"]
+            { margin-left: -0.35rem; }
+          /* the » (open detailed calibration) rail (Pavel's pick, round 3 variant A): a TALL
+             THIN ghost button spanning the parameter block's label + slider rows, sitting
+             almost FLUSH with the sidebar's right edge (the negative right offset eats most of
+             the sidebar's own right padding). Absolutely positioned (out of flow) so the
+             label/value/slider grid is untouched; the row reserves the width via its
+             padding-right. The variable-height caption stays outside the rail so the » is
+             centred on the controls. Sizing targets the <button> DIRECTLY — forcing height/
+             display on the help-tooltip wrappers surfaces a hidden duplicate button. */
+          section[data-testid="stSidebar"] [class*="st-key-row_"]
+            { position: relative; padding-right: 1.5rem; }
+          section[data-testid="stSidebar"] [class*="st-key-row_"] [class*="st-key-i_"]
+            { position: absolute; top: 0.15rem; right: -1.0rem; width: 1.35rem; margin: 0; }
+          section[data-testid="stSidebar"] [class*="st-key-row_"] [class*="st-key-i_"] button
+            { height: 4.3rem !important; width: 100%; min-height: 0; padding: 0;
+              font-size: 1.15rem; opacity: 0.65; display: grid; place-items: center;
+              border: 1px solid rgba(128,128,128,0.30); border-radius: 8px; }
+          section[data-testid="stSidebar"] [class*="st-key-row_"] [class*="st-key-i_"]
+            button:hover
+            { background: rgba(var(--accent-rgb),0.12); border-color: var(--accent); }
+          /* implied-param caption ("⇒ g_c = …") binds to ITS OWN slider: tight above, roomy
+             below (the room comes from the row's bottom margin) — it read as belonging to the
+             NEXT parameter before (Pavel, round 2) */
+          section[data-testid="stSidebar"] [class*="st-key-row_"]
+            [data-testid="stElementContainer"]:has([data-testid="stCaptionContainer"])
+            { margin-top: -0.4rem; }
+          section[data-testid="stSidebar"] [class*="st-key-row_"] { margin-bottom: 0.35rem; }
+          /* compact "Reset ↺" beside the Parameters title: quiet, right-pinned, button-sized to
+             the glyphs (replaces the old full-width reset bar) */
+          .st-key-resetall_btn button { margin-left: auto; display: block;
+            font-size: 0.8rem; padding: 0.1rem 0.55rem; min-height: 1.6rem; opacity: 0.7;
+            border-color: rgba(128,128,128,0.35); }
+          .st-key-resetall_btn button:hover { opacity: 1; color: var(--accent);
+            border-color: var(--accent); }
+          /* section headers ("Basics", …): one consistent breath above, tight below, so each
+             group reads as [header · rows] with a steady vertical rhythm */
+          section[data-testid="stSidebar"] h3 { padding: 0.9rem 0 0.75rem; font-size: 1.02rem; }
+          /* the tiny » (and per-row ↺): strip the button chrome down to a glyph */
           section[data-testid="stSidebar"] [class*="st-key-row_"] button,
           .st-key-calpanel .st-key-calclose button
             { border: none; background: transparent; padding: 0 2px; min-height: 1.2rem;
@@ -943,27 +1020,26 @@ def _layout_css(light):
           section[data-testid="stSidebar"] [class*="st-key-row_"] button:hover
             { opacity: 1; color: var(--accent); }
 
-          /* ---- D-051 graph-height: the shim sets --chart-h (clamp of panel-width × aspect and
-             the vertical fill); the responsive (autosize, height="stretch") plotly charts fill a
-             container pinned to it, so the two stacked charts occupy most of the panel and re-fit
-             to the panel width. CSS-driven (not per-chart relayout) → survives the background
-             MC-accumulation reruns.
-             (D-054) A plotly chart's height is pinned to whatever --chart-h reads when Streamlit
-             RENDERS the chart element; Streamlit then REVERTS any later client change (a pure CSS
-             --chart-h change or a Plotly.relayout never re-fits an already-mounted plot — verified
-             on BOTH local 1.59 and deployed stlite 1.57). So the mounted plots are effectively
-             this default value, uniform across tabs. Make it a viewport-fitted clamp (not a flat
-             300px) so a two-chart stack fits a short laptop on load, and size the chrome term to
-             the LARGEST-chrome 2-chart group so NO 2-chart group overflows. After the D-054/D-056
-             declutter (section headers, the how-to-read expander AND the bordered card removed)
-             BOTH groups (Graphs and Capability) have ≈8.7rem of chrome (measured at the 14px font
-             floor of wide mode; a touch less at 18px since the fixed tab-strip px shrink in rem
-             terms), so a single constant fits both AND the group-switch carry-over can't overflow
-             (equal budgets). 9.5rem sits just above 8.7 with a small cushion. The chrome is in rem
-             so it tracks the fluid font. The shim then refines the CONTAINER via --chart-h (correct
-             per group & width, and scroll-invariant); the plot re-fits on the next rerun. */
-          :root { --chart-h: clamp(150px, calc((100vh - 9.5rem) / 2), 560px); }
-          .st-key-chartscol [data-testid="stPlotlyChart"] { height: var(--chart-h) !important; }
+          /* ---- Standard graph height (Pavel 2026-07-24, supersedes the D-051/D-054 dynamic
+             sizer): ONE height for every chart, tab and mode, defined purely here — the shim no
+             longer writes --chart-h (its measured-fill writer raced the mounted plots on resize
+             and made charts overlap). The clamp is sized so the LARGEST tab — three stacked
+             charts (Financial: profit + revenue + cost, in both point and MC modes) — fits the
+             panel: chrome ≈ panel top padding 4.5rem + tab strip (TWO rows at L6, where five
+             tabs wrap on a 330px panel) ~4.6rem + MC headline ~1.8rem + draw-count row ~1.2rem
+             + inter-chart gaps ~2rem + bottom padding 2.4rem ≈ 16.5rem, divided by 3 — sized
+             to the WORST case (Financial tab in MC mode at L6), measured in-browser: with the
+             12.6rem point-mode-only estimate that tab still scrolled 68px. Depends only on the
+             viewport HEIGHT (not the panel width), so dragging the panel divider never changes
+             heights — no height race, no overlap. The MC component reads the same variable off
+             this root (chartH() in mc_component/index.html), so its fan charts match exactly.
+             overflow:hidden is the belt-and-braces guard: in the one-rerun window after a
+             window-HEIGHT resize a mounted plot may briefly disagree with its container — it
+             then clips inside its own tile instead of drawing over the next chart (the shim's
+             reconciler Plotly-resizes it right after). */
+          :root { --chart-h: clamp(160px, calc((100vh - 16.5rem) / 3), 320px); }
+          .st-key-chartscol [data-testid="stPlotlyChart"]
+            { height: var(--chart-h) !important; overflow: hidden; }
 
           /* ================= D-051 responsive modes (data-app-mode = wide|narrow|phone) =========
              WIDE is the untouched three-column layout. NARROW: the fixed charts column can't dock

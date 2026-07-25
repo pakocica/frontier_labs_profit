@@ -40,8 +40,11 @@
   .wrap { position: relative; }
   .row { display: grid; gap: 6px; }
   .cell { min-width: 0; }
-  #corner { position: absolute; top: 2px; right: 6px; z-index: 30;
-    display: flex; gap: 6px; align-items: center; }
+  /* the sample-nav / progress row sits IN FLOW above the charts (it used to float absolute
+     over the first chart's title/legend — Pavel's overlap report, 2026-07-24) */
+  #corner { display: flex; gap: 6px; align-items: center; justify-content: flex-end;
+    margin-bottom: 2px; }
+  #corner:empty { display: none; }
   #corner .count { font-size: 12px; opacity: 0.55; padding: 2px 6px; }
   #corner button { font-size: 12px; line-height: 1; padding: 4px 10px; border-radius: 12px;
     border: 1px solid; cursor: pointer; }
@@ -95,6 +98,25 @@ function armHeartbeat() {
   }, 1200);
 }
 
+// Standard chart height (Pavel 2026-07-24: ONE consistent height across tabs and modes):
+// read the app's --chart-h CSS variable off the same-origin parent — the single source the
+// point-forecast charts use too — falling back to 232px when unreadable (cross-origin, tests).
+function chartH() {
+  // getComputedStyle on a CUSTOM property returns the unresolved token stream ("clamp(...)"),
+  // so the variable is resolved by measuring a probe element that USES it.
+  try {
+    const pd = window.parent.document;
+    const probe = pd.createElement("div");
+    probe.style.cssText =
+      "position:absolute;visibility:hidden;height:var(--chart-h, 232px);width:1px;";
+    pd.documentElement.appendChild(probe);
+    const px = probe.offsetHeight;
+    probe.remove();
+    if (isFinite(px) && px > 100) return Math.round(px);
+  } catch (e) {}
+  return 232;
+}
+
 function layout(cfg, legend) {
   const TH = A.theme;
   // Compact geometry for the ~360px right chart panel (D-047): small heights and fonts.
@@ -103,7 +125,7 @@ function layout(cfg, legend) {
   return {
     title: {text: cfg.title, x: 0, y: 1, yanchor: "top", yref: "container",
             pad: {t: 4}, font: {size: 12, color: TH.fg}},
-    height: 232, margin: {l: 44, r: 8, t: 46, b: 28},
+    height: chartH(), margin: {l: 44, r: 8, t: 46, b: 28},
     paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
     font: {color: TH.fg, size: 10},
     showlegend: legend,
@@ -112,7 +134,8 @@ function layout(cfg, legend) {
     xaxis: {title: {text: "year", font: {size: 10}}, gridcolor: TH.grid,
             zerolinecolor: TH.zero, color: TH.fg, automargin: true},
     yaxis: {title: {text: cfg.ylab, font: {size: 10}}, gridcolor: TH.grid,
-            zerolinecolor: TH.zero, color: TH.fg, range: cfg.yrange, automargin: true},
+            zerolinecolor: TH.zero, color: TH.fg, range: cfg.yrange, automargin: true,
+            type: cfg.ytype || "linear"},
   };
 }
 
@@ -238,6 +261,18 @@ window.addEventListener("message", function (ev) {
   renderCorner();
   armHeartbeat();
   Streamlit.setHeight(document.querySelector(".wrap").offsetHeight + 4);
+});
+// The standard chart height tracks the parent's --chart-h (viewport-height-derived): when the
+// window (and so the iframe) resizes, re-render at the fresh height and re-report the frame
+// height — Plotly.react in place, no flash. Debounced; no-op while hidden or empty.
+let _rsT = null;
+window.addEventListener("resize", function () {
+  if (_rsT) clearTimeout(_rsT);
+  _rsT = setTimeout(function () {
+    if (!A || !A.visible || !plotted) return;
+    renderCharts();
+    Streamlit.setHeight(document.querySelector(".wrap").offsetHeight + 4);
+  }, 150);
 });
 Streamlit.ready();
 Streamlit.setHeight(0);

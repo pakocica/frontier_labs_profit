@@ -17,9 +17,10 @@ TITLE_SUB = "an interactive model of frontier-AI-lab competition"
 
 # the complexity-level concept, drafted from the level-ladder spirit (kept crisp)
 LEVEL_EXPLAINER = (
-    "The explorer is **layered**: start simple and raise the level to add one mechanism at a "
-    "time. Each level switches on exactly one more block of the model — a new equation and its "
-    "parameters — so you can isolate what each assumption changes."
+    "The explorer is **layered**: Level 1 is the bare model, and each higher level switches on "
+    "one more mechanism — a new equation and its parameters. Picking a level changes which parts "
+    "of the model are active; every level is a superset of the ones below, so raising it only "
+    "adds, never removes."
 )
 
 # author footer (ships with the widget → also appears on the web version at the next sync)
@@ -49,7 +50,10 @@ def render():
         # wide last column pushes the mode switch to the RIGHT edge (flex-end there)
         c_lab, c_sel, c_info, c_mode = st.columns([0.42, 1.15, 0.22, 2.6],
                                                    vertical_alignment="center")
-        c_lab.markdown("<div class='model-label'>Model:</div>", unsafe_allow_html=True)
+        # help= here renders the visible desktop tooltip icon next to "Model:" — the selectbox's
+        # own help never shows because its label is collapsed
+        c_lab.markdown("<div class='model-label'>Model:</div>", unsafe_allow_html=True,
+                       help=LEVEL_EXPLAINER)
         # the level selector writes st.session_state["level"]; the sidebar reads it (top of run).
         # `help` is the DESKTOP hover tooltip; the ⓘ popover (narrow/phone) carries the same text.
         c_sel.selectbox("Level", LEVEL_LABELS, key="level", label_visibility="collapsed",
