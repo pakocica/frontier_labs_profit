@@ -415,15 +415,25 @@ _D050_JS = r"""
        so the click is a graceful no-op. */
     var titleBar = d.querySelector('.st-key-apptitle');
     if (titleBar && !d.getElementById('titleLinks') && w.__flpOpenTour) {
-      /* (D-101, Pavel) TWO LABELLED buttons right of the title — "Intro Tour" and "Model Note" —
-         replacing the bare ⓘ. A lone glyph is the least discoverable control there is, and ⓘ
-         reads as "about" rather than "replay the guided tour"; the words are what stop the option
-         being missed. Both are gated on `__flpOpenTour`, i.e. on the deploy HOST being present:
-         it defines the tour and serves the PDF, so on a bare :8501 neither target exists and
-         rendering a button that silently does nothing is indistinguishable from a broken one —
-         which is exactly how the old ⓘ was reported. Preview the host layer with
-         deploy/preview.sh. The note href is RELATIVE: the site is served from a sub-path, so a
-         root-relative /model_note.pdf 404s live (D-097). */
+      /* (D-101, Pavel) TWO LABELLED buttons — "Intro Tour" and "Model Note" — replacing the bare
+         ⓘ. A lone glyph is the least discoverable control there is, and ⓘ reads as "about" rather
+         than "replay the guided tour"; the words are what stop the option being missed. Both are
+         gated on `__flpOpenTour`, i.e. on the deploy HOST being present: it defines the tour and
+         serves the PDF, so on a bare :8501 neither target exists and rendering a button that
+         silently does nothing is indistinguishable from a broken one — which is exactly how the
+         old ⓘ was reported. Preview the host layer with deploy/preview.sh. The note href is
+         RELATIVE: the site is served from a sub-path, so a root-relative /model_note.pdf 404s
+         (D-097).
+
+         (D-102, Pavel) The row now sits ABOVE the title box, not absolutely pinned inside it.
+         Pinned, the pair floated over the centred heading: the title is centred and grows with
+         the fluid font, so on any window where it reaches the right edge the labels landed ON the
+         words ("ofitable?" behind "Intro Tour" — Pavel's screenshot). Absolute positioning has no
+         way to know that; nothing short of leaving the title's line fixes it. As its own
+         wrapper-level row the buttons have their own space, can carry a real background, and the
+         heading is never overlapped at any width. Inserted BEFORE the title container inside the
+         same layout wrapper (which holds only that container), so it inherits the title's width
+         and right edge; the observer re-adds it if a rerun reconciles it away. */
       var box = d.createElement('div');
       box.id = 'titleLinks';
       var tb = d.createElement('button');
@@ -435,7 +445,8 @@ _D050_JS = r"""
       nb.href = './model_note.pdf'; nb.target = '_blank'; nb.rel = 'noopener';
       nb.title = 'The model note (PDF) — the paper companion to this explorer';
       box.appendChild(tb); box.appendChild(nb);
-      titleBar.appendChild(box);
+      var titleHost = titleBar.parentNode;
+      if (titleHost) titleHost.insertBefore(box, titleBar); else titleBar.appendChild(box);
     }
   }
 
@@ -878,21 +889,34 @@ def _layout_css(light):
             background: __PANEL_BG__; border-radius: 10px;
             border: 1px solid rgba(128,128,128,0.15); }
           .st-key-apptitle div { margin: 0 !important; }
-          /* (D-058) the ⓘ replay-intro control, pinned to the title bar's right edge */
-          /* (D-101) the two labelled title links, right-aligned on the title row */
-          #titleLinks { position: absolute; top: 50%; right: 0.7rem; transform: translateY(-50%);
-            display: flex; gap: 0.4rem; align-items: center; }
-          .title-lnk { padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.8rem;
-            line-height: 1.35; white-space: nowrap; cursor: pointer; text-decoration: none;
-            opacity: 0.72; background: transparent; color: inherit;
+          /* (D-058 ⓘ → D-101 labels → D-102 placement) the two title links ride in their own row
+             ABOVE the title box, right-aligned. Pinned inside the bar they overlapped the centred
+             heading whenever it grew wide enough to reach them; out here they never can. The row
+             is a wrapper-level sibling of the title container, so it shares the title's width —
+             the wrapper's flex gap is zeroed and the spacing set on the row itself. */
+          [data-testid="stLayoutWrapper"]:has(> .st-key-apptitle) { gap: 0 !important; }
+          #titleLinks { display: flex; gap: 0.4rem; align-items: center; justify-content: flex-end;
+            margin: 0 0 0.35rem 0; }
+          /* solid, not ghosted: on the page background a transparent 0.72-opacity pill reads as
+             decoration. The panel fill matches the title box below it, so the pair reads as part
+             of the same heading block. */
+          /* the pair is one <button> + one <a>; the app's base sheet sizes bare buttons at 16px
+             and beats a lone class selector, so the two rendered at visibly different sizes
+             (browser-verified). The font rules are id-scoped AND !important so the button and
+             the link are typographically identical. */
+          #titleLinks .title-lnk { padding: 0.2rem 0.7rem; border-radius: 999px;
+            font-size: 0.8rem !important; line-height: 1.4 !important; font-weight: 500 !important;
+            font-family: inherit !important;
+            white-space: nowrap; cursor: pointer; text-decoration: none;
+            opacity: 1; background: __PANEL_BG__; color: inherit;
             border: 1px solid rgba(128,128,128,0.35);
-            transition: opacity 0.15s, color 0.15s, border-color 0.15s, background 0.15s; }
-          .title-lnk:hover { opacity: 1; color: var(--accent); border-color: var(--accent);
-            background: rgba(var(--accent-rgb),0.10); }
-          /* phone: the title row is tight, so shrink rather than wrap — two short labels still
-             fit where a wrapped pair would push the title itself out of the bar */
-          html[data-app-mode="phone"] #titleLinks { right: 0.4rem; gap: 0.25rem; }
-          html[data-app-mode="phone"] .title-lnk { padding: 0.1rem 0.4rem; font-size: 0.68rem; }
+            transition: color 0.15s, border-color 0.15s, background 0.15s; }
+          #titleLinks .title-lnk:hover { color: var(--accent); border-color: var(--accent);
+            background: rgba(var(--accent-rgb),0.12); }
+          /* phone: the row is tight, so shrink rather than wrap */
+          html[data-app-mode="phone"] #titleLinks { gap: 0.25rem; margin-bottom: 0.25rem; }
+          html[data-app-mode="phone"] #titleLinks .title-lnk
+            { padding: 0.12rem 0.45rem; font-size: 0.7rem !important; }
           /* the prose max-width cap (base CSS) would pin the title/footer text left — lift it */
           .st-key-apptitle [data-testid="stMarkdownContainer"],
           .st-key-appfooter [data-testid="stMarkdownContainer"]

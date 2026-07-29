@@ -112,7 +112,9 @@ html[data-tour-open] #root {
 /* the card's footer: the loading→ready action, seamless with the card surface */
 #intro .tour-cta {
   flex: 0 0 auto; z-index: 11;
-  display: flex; flex-direction: column; align-items: center; gap: 7px;
+  /* gap:0 — the note row owns its own spacing (it collapses to zero height off the end
+     slides, and a flex gap would leave a phantom 7px behind it) */
+  display: flex; flex-direction: column; align-items: center; gap: 0;
   padding: 14px 22px 18px;
   background: var(--surface, #161b22);
   border-top: 1px solid var(--line, rgba(139, 152, 166, .12));
@@ -127,26 +129,37 @@ html[data-tour-open] #root {
 }
 #intro .tour-sub {
   font-size: 12px; color: var(--muted, #8b98a6); min-height: 1em;
+  margin-top: 7px;
   font-family: var(--mono, ui-monospace, Menlo, monospace); letter-spacing: .02em;
 }
 
-/* the model note (D-097): the "while you wait" reading, parked in the boot bar
-   UNDER the primary action. In the bar rather than on a slide because it must be
-   reachable from EVERY slide and in BOTH modes (full deck / cover-only return
-   card) — and because the bar is precisely the dead time it fills. Opens in a new
-   tab (tour.js): a same-tab navigation would discard the half-loaded Pyodide
-   runtime this bar is waiting on. */
+/* the model note (D-097; placement D-103): in the boot bar ABOVE the primary
+   action, on the first and last slide only. In the bar rather than on a slide
+   because it must survive both modes (full deck / cover-only return card) and
+   because the bar is precisely the dead time it fills — but under the button it
+   sat last in the card and dimmed the moment the blue button lit up, which is how
+   it went unnoticed. Above the button it is on the way to the action instead of
+   past it. Opens in a new tab (tour.js): a same-tab navigation would discard the
+   half-loaded Pyodide runtime this bar is waiting on. */
 #intro .tour-note {
-  width: 100%; max-width: 320px; margin-top: 3px; padding-top: 11px;
-  border-top: 1px solid var(--line, rgba(139, 152, 166, .12));
+  width: 100%; max-width: 320px;
+  overflow: hidden; max-height: 0; opacity: 0;
+  transition: max-height .32s ease, opacity .24s ease;
 }
+#intro[data-note="1"] .tour-note { max-height: 160px; opacity: 1; }
+#intro .tour-note-in { padding-bottom: 12px; }
 #intro .note-link { padding: 9px 11px; gap: 10px; }
 #intro .note-lead { font-size: 13px; }
 #intro .note-sub  { font-size: 11.5px; }
-/* once the widget is ready the blue button owns the eye; the note steps back a
-   little — still fully legible, still clickable */
-#intro[data-ready="1"] .tour-note { opacity: .8; transition: opacity .35s ease; }
-#intro[data-ready="1"] .tour-note:hover { opacity: 1; }
+/* the accent-tinted edge is what makes it register as an offer next to the big
+   button below it — the plain --line border read as a divider */
+#intro .note-link {
+  border-color: color-mix(in srgb, var(--accent, #4c8dff) 32%, transparent);
+  background: color-mix(in srgb, var(--accent, #4c8dff) 7%, var(--surface-2, #1c232d));
+}
+@media (prefers-reduced-motion: reduce) {
+  #intro .tour-note { transition: none; }
+}
 
 /* COMPACT form — one accent line instead of the panel. The panel costs the bar
    ~95px; the line costs ~30px. Two windows cannot afford the panel:
@@ -159,8 +172,10 @@ html[data-tour-open] #root {
    compact form keeps that boundary where it was rather than moving it up. */
 @media (max-width: 548px), (max-height: 799px) {
   /* the bar carries one row more than it was designed for — tighten its own box too */
-  #intro .tour-cta  { padding: 11px 16px 14px; gap: 5px; }
-  #intro .tour-note { margin-top: 0; padding-top: 7px; }
+  #intro .tour-cta     { padding: 11px 16px 14px; }
+  #intro .tour-sub     { margin-top: 5px; }
+  #intro .tour-note-in { padding-bottom: 8px; }
+  #intro[data-note="1"] .tour-note { max-height: 60px; }
   #intro .note-link { padding: 4px 0; gap: 8px; background: none; border: none; }
   #intro .note-link:hover { background: none; }
   #intro .note-sub  { display: none; }

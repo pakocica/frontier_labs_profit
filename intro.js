@@ -16,6 +16,8 @@
        immediately (even mid-load); the ready button enters; and click-anywhere
        on the backdrop dismisses ONLY AFTER ready (before ready, backdrop clicks
        do nothing, so nobody bounces into a half-loaded app).
+     - Directly ABOVE that button, on the first and last slide only, sits the
+       model-note (PDF) link — the one other place to go from here (D-103).
 
    The overlay NEVER auto-dismisses. The widget title's (i) button (injected by
    ui/theme.py) reopens the full deck via window.__flpOpenTour.
@@ -51,13 +53,19 @@
         '<button class="tour-x" type="button" aria-label="Close the introduction" title="Close">×</button>' +
         '<div class="tour-stage"><div class="tour-deck"></div></div>' +
         '<div class="tour-cta">' +
+          // the model note (D-097, placed by D-103): ABOVE the primary button, and only on
+          // the FIRST and LAST slides. Under the button it was the last thing in the card,
+          // below the fold of attention and dimmed once the blue button lit up — Pavel read
+          // it as barely noticeable. Above it, it is on the path the eye already takes to
+          // the action. Restricted to the two slides where leaving is on the reader's mind
+          // (the cover, where the wait starts, and the outro, where the tour ends) so the
+          // eight explanatory slides in between keep a clean one-action bar.
+          // New-tab (tour.js): a click must never kill the boot it is filling time for.
+          '<div class="tour-note"><div class="tour-note-in">' +
+            (window.FLPTour.noteHTML ? window.FLPTour.noteHTML("Read the model note while you wait") : "") +
+          '</div></div>' +
           '<button class="tour-go" type="button"></button>' +
           '<div class="tour-sub"></div>' +
-          // the model note (D-097): in the bar, so it survives both modes and every
-          // slide; new-tab, so a click never kills the boot it is filling time for
-          '<div class="tour-note">' +
-            (window.FLPTour.noteHTML ? window.FLPTour.noteHTML("Read the model note while you wait") : "") +
-          '</div>' +
         '</div>' +
       '</div>';
     root.setAttribute("data-tour-open", "1");
@@ -71,7 +79,10 @@
       delete cover.hint;                 // a single card needs no "step through" nudge
       slides = [cover];
     }
-    window.FLPTour.mountDeck(host, { env: "laptop", slides: slides });
+    /* (D-103) the note row follows the deck: shown on the first and last slide only. A
+       single-slide mount (min mode) is both at once, so it keeps the note. */
+    window.FLPTour.mountDeck(host, { env: "laptop", slides: slides,
+      onIndex: function (i, N) { showNote(el, i === 0 || i === N - 1); } });
 
     wire(el);
     renderButton(el);
@@ -93,6 +104,14 @@
       if (e.target.closest(".tour-card")) return;
       leave();
     });
+  }
+
+  /* (D-103) show/hide the note row. An attribute rather than display:none so the row can
+     animate its height — the bar changes size as you step onto and off the end slides, and
+     an instant jump under the button would read as a glitch. */
+  function showNote(el, on) {
+    el = el || document.getElementById("intro");
+    if (el) el.setAttribute("data-note", on ? "1" : "0");
   }
 
   function renderButton(el) {

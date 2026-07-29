@@ -170,7 +170,8 @@ window.FLPTour = (function () {
     if (foot)     h += '<p class="foot">' + foot + '</p>';
     /* the model-note link rides on the slide only where the host has no chrome to put it
        in — i.e. the PHONE, whose deck is the whole, terminal experience. The laptop
-       overlay shows it once, persistently, in its boot bar (intro.js), so repeating it
+       overlay renders it in its boot bar instead (intro.js), just above the primary
+       button and on the same first/last slides this flag marks (D-103) — so repeating it
        inside the slides there would be the same link twice on one screen. */
     if (s.note && env !== "laptop") h += noteHTML();
     if (s.credit) h += '<p class="credit">' + s.credit + '</p>';
