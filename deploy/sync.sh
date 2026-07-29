@@ -13,7 +13,10 @@ SRC="${1:-/Users/macbook/Library/CloudStorage/GoogleDrive-pakocica@gmail.com/My 
 
 rm -rf "$REPO/src"
 mkdir -p "$REPO/src/ui" "$REPO/src/mc_component"
-cp "$SRC/app.py" "$SRC/notebook_loader.py" "$SRC/model_notebook.ipynb" "$REPO/src/"
+# The model is a plain-Python module now (D-085: model_notebook.ipynb + notebook_loader.py were
+# retired when the model left the notebook). Listed EXPLICITLY rather than as src/*.py so that
+# model_demo.py — matplotlib illustrations, never imported by the app — cannot reach the bundle.
+cp "$SRC/app.py" "$SRC/model.py" "$REPO/src/"
 cp "$SRC"/ui/*.py "$REPO/src/ui/"
 cp "$SRC/mc_component/index.html" "$REPO/src/mc_component/"
 
@@ -31,6 +34,14 @@ cp "$SRC/mc_component/index.html" "$REPO/src/mc_component/"
 # of it has gone missing so a bad sync can't silently ship a page without the intro.
 for f in index.html intro.js intro.css; do
   [ -f "$REPO/$f" ] || { echo "error: $REPO/$f is missing — the root host/intro layer was clobbered; restore it before pushing"; exit 1; }
+done
+
+# Guard: the app imports the model as a plain module, so a src/ tree without model.py is a WHITE
+# SCREEN, not a degraded page. This script rm -rf's src/ before copying, so a stale filename above
+# would destroy the sources and ship nothing — which is exactly what happened to the two retired
+# notebook filenames. Fail before anything can be committed.
+for f in app.py model.py; do
+  [ -f "$REPO/src/$f" ] || { echo "error: $REPO/src/$f is missing — the model source did not sync; the app cannot import it"; exit 1; }
 done
 
 echo "synced from: $SRC"
