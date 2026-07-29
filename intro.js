@@ -53,6 +53,11 @@
         '<div class="tour-cta">' +
           '<button class="tour-go" type="button"></button>' +
           '<div class="tour-sub"></div>' +
+          // the model note (D-097): in the bar, so it survives both modes and every
+          // slide; new-tab, so a click never kills the boot it is filling time for
+          '<div class="tour-note">' +
+            (window.FLPTour.noteHTML ? window.FLPTour.noteHTML("Read the model note while you wait") : "") +
+          '</div>' +
         '</div>' +
       '</div>';
     root.setAttribute("data-tour-open", "1");
@@ -96,6 +101,10 @@
     el.setAttribute("data-ready", ready ? "1" : "0");
     var go = el.querySelector(".tour-go"), sub = el.querySelector(".tour-sub");
     if (!go) return;
+    // the note's lead tracks the same state: "while you wait" is only true while
+    // there IS a wait — once the widget is ready it is simply an offer
+    var lead = el.querySelector(".tour-note .note-lead");
+    if (lead) lead.textContent = ready ? "Read the model note" : "Read the model note while you wait";
     if (ready) {
       go.innerHTML = '<span class="tour-dot" aria-hidden="true"></span>Go to the widget &#8594;';
       if (sub) sub.textContent = "Ready — take your time.";

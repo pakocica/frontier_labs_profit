@@ -2,8 +2,7 @@
 export const APP_FILES = [
   "src/app.py",
   "src/mc_component/index.html",
-  "src/model_notebook.ipynb",
-  "src/notebook_loader.py",
+  "src/model.py",
   "src/ui/__init__.py",
   "src/ui/calibration.py",
   "src/ui/calpanel.py",

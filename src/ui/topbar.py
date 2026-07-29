@@ -2,25 +2,27 @@
 
 `render_title()` draws the page's main heading (spanning the middle pane, all responsive modes);
 `render()` draws the sticky top strip — a "Model:" label + the complexity-level selector (with an
-explainer: a hover tooltip on desktop, an ⓘ popover on narrow/phone) at the LEFT, the "Point
-forecast | Monte Carlo" mode switch at the RIGHT. `render_footer()` draws the quiet author
-attribution. Both widgets bind to plain session keys ("mode", "level") read at the top of the run.
+explainer: a hover tooltip on desktop, an ⓘ popover on narrow/phone). The "Point forecast |
+Monte Carlo" mode switch moved to the top of the CHARTS panel (Pavel, round 2: "it relates to
+the graphs") — see views._charts_column; it still binds the plain "mode" session key read at
+the top of the run. `render_footer()` draws the quiet author attribution.
 """
 import streamlit as st
 
 from .levels import LEVEL_LABELS
-from .state import _reg
 
 # ---- one-line constant swaps (Pavel owns the wording) --------------------------------------
 TITLE_MAIN = "Will Frontier AI Labs Be Profitable?"
 TITLE_SUB = "an interactive model of frontier-AI-lab competition"
 
-# the complexity-level concept, drafted from the level-ladder spirit (kept crisp)
+# the complexity-level concept, drafted from the level-ladder spirit (kept crisp).
+# D-081: "one more mechanism" became "the next block of mechanisms" — the merged Level 2
+# switches on the whole dynamics package (slowdown + ℓ + RSI engine + saturation) at once.
 LEVEL_EXPLAINER = (
-    "The explorer is **layered**: Level 1 is the bare model, and each higher level switches on "
-    "one more mechanism — a new equation and its parameters. Picking a level changes which parts "
-    "of the model are active; every level is a superset of the ones below, so raising it only "
-    "adds, never removes."
+    "The explorer is **layered**: Level 1 is the bare steady-growth model, and each higher "
+    "level switches on the next block of mechanisms — new equations and their parameters. "
+    "Picking a level changes which parts of the model are active; every level is a superset of "
+    "the ones below, so raising it only adds, never removes."
 )
 
 # author footer (ships with the widget → also appears on the web version at the next sync)
@@ -44,12 +46,12 @@ def render_title():
 
 
 def render():
-    """The sticky top strip: [Model: · level selector · ⓘ] at the left, mode switch flush right."""
+    """The sticky top strip: [Model: · level selector · ⓘ] at the left; the wide last column
+    is EMPTY (the mode switch lives in the charts panel now) but keeps the first three
+    left-pinned."""
     with st.container(key="topbar"):
-        # ratios: label+picker+ⓘ hug the LEFT edge (picker width-capped in theme CSS), the
-        # wide last column pushes the mode switch to the RIGHT edge (flex-end there)
-        c_lab, c_sel, c_info, c_mode = st.columns([0.42, 1.15, 0.22, 2.6],
-                                                   vertical_alignment="center")
+        c_lab, c_sel, c_info, _fill = st.columns([0.42, 1.15, 0.22, 2.6],
+                                                 vertical_alignment="center")
         # help= here renders the visible desktop tooltip icon next to "Model:" — the selectbox's
         # own help never shows because its label is collapsed. NOTE: the label text must stay
         # plain markdown — with unsafe_allow_html=True Streamlit leaves the help directive
@@ -67,13 +69,6 @@ def render():
             with st.container(key="levelinfo"):
                 with st.popover("ⓘ", help="what the complexity level means"):
                     st.markdown(LEVEL_EXPLAINER)
-        _reg("mode", "Point forecast")
-        c_mode.segmented_control("Mode", ["Point forecast", "Monte Carlo"], key="mode",
-                                 label_visibility="collapsed",
-                                 help="**Point forecast** shows the single trajectory at the spot "
-                                      "values. **Monte Carlo** shows the forecast fan across the "
-                                      "sampling ranges — it keeps accumulating in the background "
-                                      "either way, so switching is instant.")
 
 
 def render_footer():

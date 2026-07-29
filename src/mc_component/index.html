@@ -131,11 +131,21 @@ function layout(cfg, legend) {
     showlegend: legend,
     legend: {orientation: "h", yanchor: "bottom", y: 1.0, xanchor: "right", x: 1.0,
              font: {size: 9}},
-    xaxis: {title: {text: "year", font: {size: 10}}, gridcolor: TH.grid,
+    // calendar years (D-076): the server sends t already shifted to 2026 + t; tickformat "d"
+    // keeps them as 2026, not the locale's "2,026"
+    xaxis: {title: {text: "year", font: {size: 10}}, gridcolor: TH.grid, tickformat: "d",
             zerolinecolor: TH.zero, color: TH.fg, automargin: true},
     yaxis: {title: {text: cfg.ylab, font: {size: 10}}, gridcolor: TH.grid,
             zerolinecolor: TH.zero, color: TH.fg, range: cfg.yrange, automargin: true,
             type: cfg.ytype || "linear"},
+    // (D-080) optional dashed reference hline + label (the coverage fan's 100% break-even) —
+    // the server sends {y, text} per chart; absent = no shapes/annotations
+    shapes: cfg.refline ? [{type: "line", xref: "paper", x0: 0, x1: 1,
+                            y0: cfg.refline.y, y1: cfg.refline.y,
+                            line: {color: TH.muted, width: 1, dash: "dash"}}] : [],
+    annotations: cfg.refline ? [{xref: "paper", x: 0.01, y: cfg.refline.y, yanchor: "bottom",
+                                 text: cfg.refline.text, showarrow: false,
+                                 font: {size: 9, color: TH.muted}}] : [],
   };
 }
 

@@ -146,6 +146,31 @@
 .credit { margin: 4px 0 0; font-family: var(--mono); font-size: 11px; line-height: 1.6; color: var(--faint);
   letter-spacing: .02em; }
 
+/* ---- the model-note link (D-097) — the "while you wait" reading -------------
+   Shared by both hosts, so the wording and the href can never drift: the phone
+   renders it inside the cover/outro slides (it has no chrome), the laptop overlay
+   inside its boot bar (sizing tweaks in intro.css). Deliberately a quiet PANEL,
+   not a button — unmistakably clickable, but never mistaken for the laptop's
+   primary "Go to the widget" action. */
+.note-link {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 13px; border-radius: 12px; text-decoration: none;
+  background: var(--surface); border: 1px solid var(--line); color: var(--ink);
+  transition: border-color .18s ease, background .18s ease;
+}
+.note-link:hover { border-color: var(--accent); background: var(--surface-2); }
+.note-tag {
+  flex: 0 0 auto; font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
+  padding: 4px 7px; border-radius: 6px; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+}
+.note-txt  { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.note-lead { font-size: 13.5px; font-weight: 650; line-height: 1.3; color: var(--ink); }
+.note-sub  { font-size: 12px; line-height: 1.4; color: var(--muted); text-wrap: pretty; }
+.note-ar   { margin-left: auto; flex: 0 0 auto; color: var(--muted); font-size: 15px; }
+.note-link:hover .note-ar { color: var(--accent); }
+
 .swipehint { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted);
   font-family: var(--mono); letter-spacing: .04em; }
 .swipehint .ar { animation: nudge 1.6s ease-in-out infinite; font-style: normal; }

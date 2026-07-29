@@ -1,24 +1,13 @@
-"""Model access (D-025): the notebook is the single source of truth for model code and
-calibration data. Loaded once per process; everything here is immutable after load.
+"""Model access (D-025): `model.py` is the single source of truth for model code and
+calibration data. Everything here is immutable after import.
+
+D-085: the model is a plain module now — the notebook-parsing loader is gone, so this is an
+ordinary import and Python's module cache does the "once per process" work that
+`st.cache_resource` used to.
 """
-from pathlib import Path
+import model as m
 
-import streamlit as st
-
-import notebook_loader
-
-NB = str(Path(__file__).resolve().parent.parent / "model_notebook.ipynb")
-
-
-@st.cache_resource
-def get_model():
-    """Load all model functions from the notebook once per session."""
-    return notebook_loader.load_model(NB)
-
-
-m = get_model()
-
-P0 = m.Params()  # notebook defaults — the single source of truth for every control's initial value
-TDEF = m.target_defaults()      # exact forward images of the notebook defaults (round-trip exact)
+P0 = m.Params()  # model defaults — the single source of truth for every control's initial value
+TDEF = m.target_defaults()      # exact forward images of the model defaults (round-trip exact)
 _PARAM_TO_TARGET = {v: k for k, v in m.TARGET_PARAM.items()}
 _PARAM_TO_TARGET.update({"delta_dev": "t_lag_mo", "delta_rel": "t_lag_mo"})

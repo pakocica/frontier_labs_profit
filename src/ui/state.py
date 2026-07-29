@@ -1,7 +1,7 @@
 """Session-state infrastructure: the reset registry (keyed widgets, seed-if-absent),
-dual-mode range/spot stores (D-041: sv_*/rmv_* shadow keys, _spoton_ transition flag),
-the user-edited MC sampling-range override store (_range_over, D-040/41/42), distribution
-bounds/fitting utilities, and the per-run level()/mc_active() reads.
+the spot shadow store (sv_* keys) and trim-crop helpers (D-079), the user-edited MC
+sampling-range override store (_range_over, D-040/41/42), distribution bounds/fitting
+utilities, and the per-run level()/mc_active() reads.
 The GC-proof patterns here fix real Streamlit bugs — see D-041/D-042 implementation notes.
 """
 import numpy as np
@@ -14,16 +14,17 @@ from .model_access import m, P0, TDEF
 def level():
     """The active level, read from session state (seeded so the selector widget can bind
     to the same key later in the run without a default= conflict). Values outside the current
-    ladder (e.g. a stale "7 · …" from before the D-044 cap) clamp to Level 1."""
+    ladder (e.g. a stale "2 · Training in advance" from before the D-081 merge, or a stale
+    "7 · …" from before the D-044 cap) clamp to Level 1."""
     if st.session_state.get("level") not in LEVEL_LABELS:
         st.session_state["level"] = LEVEL_LABELS[0]
     return int(st.session_state["level"].split(" ", 1)[0])
 
 
 def mc_active():
-    """True while the top-bar mode switch (D-043) is on Monte Carlo: the dual-mode sidebar
-    rows render and the chart tiles show the MC fans. Accumulation itself runs in EITHER
-    mode (background precalc)."""
+    """True while the mode switch (atop the charts panel since round 2) is on Monte Carlo:
+    the trim lanes render and the chart tiles show the MC fans. Accumulation itself runs in
+    EITHER mode (background precalc)."""
     if "mode" not in st.session_state:
         st.session_state["mode"] = "Point forecast"
     return st.session_state.get("mode") == "Monte Carlo"
@@ -50,9 +51,41 @@ def close_cal():
     st.session_state.pop("_cal_scrolled", None)   # re-arm the panel's one-shot autoscroll
 
 
+def toggle_cal(key, pinned=False):
+    """» rail callback (Pavel: the button should "both open and close"): open the docked
+    panel on this parameter; a second click on the SAME row's » closes it; another row's »
+    switches the panel to that parameter."""
+    if st.session_state.get("_cal_open") == key:
+        close_cal()
+    else:
+        open_cal(key, pinned)
+
+
 # (the right chart panel's collapse/width moved CLIENT-side in D-050 — theme.inject_frontend_js
 # owns it via localStorage + a root CSS variable, so no server state exists for it anymore; the
 # panel column itself renders every run and the MC component stays mounted by construction)
+
+
+# ---- D-078 parameter-row accordion + equation sync -----------------------------------------
+# `_p_open` holds the ONE expanded sidebar row's container key ("row_t_compute_x"), or None —
+# an accordion by construction (opening a row is a plain overwrite). Clicking a row title also
+# focuses the subsection that carries the parameter: `_eq_focus` (read by
+# equations.visible_subsections, so the concise view reveals it WITHOUT flipping the show-all
+# toggle) and `_eq_focus_bump` (a click counter — the focused expander force-opens and the
+# pane autoscrolls once per bump, not on every rerun). The old forced Introduction→Equations
+# pane switch retired with the pane tabs (round 2 — the pane is Equations-only now).
+def toggle_param_row(row_id, sub_id):
+    """Row-title click callback: accordion-toggle this row; on OPEN, focus its subsection."""
+    S = st.session_state
+    if S.get("_p_open") == row_id:                     # clicking the open row collapses it
+        S["_p_open"] = None
+        S["_eq_focus"] = None
+        return
+    S["_p_open"] = row_id
+    close_cal()                                        # the pane only renders while cal is shut
+    S["_eq_focus"] = sub_id                            # None for unmapped dials → no reveal
+    if sub_id:
+        S["_eq_focus_bump"] = int(S.get("_eq_focus_bump", 0)) + 1
 
 
 # ---- reset infrastructure -----------------------------------------------------------------
@@ -79,19 +112,72 @@ def _reset_all():
     st.session_state["_range_over"] = {}   # restore every narrowed MC sampling range
 
 
+# ---- D-080: the coverage dial and its app-side range. Coverage ρ = E/B is the ONLY identified
+# object on the finance side, so the widget dials it directly — in PERCENT.
+#
+# D-093 removed the hidden nominal scale entirely. COV_R0 = 100 and COV_K = 0.75 are GONE: the
+# dial used to be translated into an (R₀, m, k) triple for a model that divided the triple back
+# out, and now `Params.rho` IS the dialled object. The dimension stays app-side, and this overlay
+# with it, for ONE remaining reason — the UNIT. The dial is a percentage because that is how
+# coverage is read ("53 cents per dollar of build spend"), while the parameter is the fraction,
+# so the envelope below cannot live in PARAM_RANGES, which is in parameter units. Everything
+# that would read a notebook range for this key reads this overlay instead.
+#
+# The envelope (and the tight default — it is already a union) spans BOTH documented bases: the
+# FIN4(b) run-rate restatement ρ ≈ 0.42 [0.33, 0.56] and the calendar-basis 0.533; the pending
+# FIN4 basis ruling re-centres this dial and is the only open finance calibration question.
+APP_RANGES = {"cov0": ("uniform", 33.0, 56.0)}
+APP_SIM_DEFAULT = {"cov0": ("uniform", 33.0, 56.0)}
+
+
+def _base_rng(key):
+    """The vetted ENVELOPE distribution for a dimension: notebook targets, notebook free
+    dials, or the app-side overlay (D-080's coverage dial)."""
+    return m.TARGET_RANGES.get(key) or m.PARAM_RANGES.get(key) or APP_RANGES.get(key)
+
+
+def _sim_rng(key):
+    """The tight DEFAULT simulation distribution, overlay included."""
+    return m.SIM_DEFAULT.get(key, APP_SIM_DEFAULT.get(key))
+
+
 def _gc_sym():
-    """Display symbol for today's compute growth: plain g_c below the slowdown level (L1-3, where
-    there is no g_c0 vs g_c∞ distinction to draw), subscripted g_c0 from L4 (display only)."""
-    return "g_c" if level() < 4 else "g_{c0}"
+    """Display symbol for compute growth TODAY. ALWAYS the plain g_c (D-077, Pavel): the base model
+    has only the value at t = 0, so there is no zero index to carry; the slowdown extension
+    introduces the FLOOR g_{c∞} as the second symbol and writes the path as g_c(t), leaving the
+    initial value named g_c throughout. (The Params field is still `g_C0` internally — a code
+    name, never shown.) This is what the compute DIAL, the g_a residual and the merged δ all
+    mean, at every level."""
+    return "g_c"
+
+
+def _gc0_sym():
+    """Display symbol for the Params FIELD `g_C0`. Plain g_c at EVERY level since D-088 — the
+    field is today's compute growth, which is what its name always said.
+
+    HISTORY, because this function existed only to paper over the gap it names. Between D-084 and
+    D-086 the field held the pre-slowdown PLATEAU while the dial stated today's rate, so from
+    Level 2 the two were different numbers (at p₀ᶜ = 25%, 0.637 vs 0.511 OOM/yr) and anything
+    displaying g_C0 had to say `g_c^{pre}` there or contradict the caption beside it. D-088 moved
+    the plateau identity inside Γ, so the field IS the observable again and the split is gone:
+    the plateau is a derived intermediate that no dial and no card ever shows.
+
+    Kept as a function rather than inlined so the one place that decides this stays one place —
+    and because callers in three modules import it (D-088 chose the no-op over editing them)."""
+    return _gc_sym()
 
 
 def _tbounds_of(rng):
-    """Natural-unit endpoints of a distribution: uniform/triangular bounds, lognormal ~90% CI."""
+    """Natural-unit endpoints of a distribution: uniform/triangular bounds, lognormal ~90% CI.
+    A scale_of band's natural units are the SHARE of its reference draw (audit X-10: the g_a_F
+    dial is that share, so its bounds live here too)."""
     if rng[0] == "lognormal":
         med = float(np.exp(rng[1]))
         return med * float(np.exp(-1.645 * rng[2])), med * float(np.exp(1.645 * rng[2]))
     if rng[0] == "triangular":                # ("triangular", lo, mode, hi)
         return float(rng[1]), float(rng[3])
+    if rng[0] == "scale_of":                  # ("scale_of", ref_key, lo_share, hi_share)
+        return float(rng[2]), float(rng[3])
     return float(rng[1]), float(rng[2])
 
 
@@ -116,6 +202,8 @@ def _fit_range(base, lo, hi):
         return ("triangular", float(lo), float(np.clip(base[2], lo, hi)), float(hi))
     if kind == "uniform":
         return ("uniform", float(lo), float(hi))
+    if kind == "scale_of":                    # endpoints are shares of the reference draw
+        return ("scale_of", base[1], float(lo), float(hi))
     return base
 
 
@@ -123,13 +211,13 @@ def _active_rng(key):
     """(distribution, edited?) actually simulated for a target/free-dial key: the user override
     if set (fitted with the ENVELOPE's distribution family), else the tight SIM_DEFAULT, else
     None — a POINT default (the dimension is pinned, not sampled)."""
-    base = m.TARGET_RANGES.get(key) or m.PARAM_RANGES.get(key)
+    base = _base_rng(key)
     if base is None:
         return None, False
     over = st.session_state.get("_range_over", {})
     if key in over:
         return _fit_range(base, *over[key]), True
-    return m.SIM_DEFAULT.get(key), False
+    return _sim_rng(key), False
 
 
 def _active_ranges():
@@ -145,37 +233,11 @@ def _active_ranges():
     return tr, pr
 
 
-def _commit_range(ekey, v, dflt):
-    """Commit the modal range editor's current endpoints to the override store (returning the
-    ends to the DEFAULT simulation range drops the override). Called inline with the slider's
-    return value — see the note at the editor. Returns True when the store actually changed."""
-    over = st.session_state.setdefault("_range_over", {})
-    before = over.get(ekey)
-    if abs(v[0] - dflt[0]) < 1e-9 and abs(v[1] - dflt[1]) < 1e-9:
-        over.pop(ekey, None)
-    else:
-        over[ekey] = (float(v[0]), float(v[1]))
-    return over.get(ekey) != before
-
-
-def _bump_rng_widget(ekey):
-    """Invalidate the modal range editor's widget so it re-seeds from the store (see the
-    versioned-key note in _cal_dialog)."""
-    S = st.session_state
-    S[f"_rngv_{ekey}"] = int(S.get(f"_rngv_{ekey}", 0)) + 1
-
-
-def _reset_range(ekey, dflt):
-    st.session_state.setdefault("_range_over", {}).pop(ekey, None)
-    _bump_rng_widget(ekey)
-
-
 def _use_range(ekey, ci, env):
-    """[use as range] on a source row: set the MC range to the source's documented CI (clipped
-    to the vetted envelope)."""
+    """[choose range] on a source row: set the MC crop to the source's documented CI (clipped
+    to the vetted envelope). The trim lane re-syncs from the store next run."""
     lo, hi = max(float(ci[0]), env[0]), min(float(ci[1]), env[1])
     st.session_state.setdefault("_range_over", {})[ekey] = (lo, hi)
-    _bump_rng_widget(ekey)
 
 
 def _active_span(ekey):
@@ -183,69 +245,118 @@ def _active_span(ekey):
     return st.session_state.get("_range_over", {}).get(ekey, _default_span(ekey))
 
 
-# ---- dual-mode controls (D-041): every MC-sampled dimension has a minimal tick that switches
-# between RANGE mode (default — the control is the two-ended MC sampling range; the deterministic
-# paths use the remembered spot value, shown gently) and SPOT mode (single value used everywhere;
-# the dimension is pinned out of the MC). Spot values survive mode switches in plain `sv_` keys
-# (widget keys are garbage-collected when their widget skips a run).
+# ---- trim-crop controls (D-079, replacing the D-041 range/spot mode tick): every editable
+# MC-sampled dimension carries a two-handle trim CROP alongside the always-mounted spot slider.
+# The crop IS the MC sampling range; a crop collapsed to a point is a PIN (the dimension leaves
+# the sampled set), so point-default dimensions start with both handles on the spot. Spot values
+# survive row filtering in plain `sv_` keys (widget keys are garbage-collected when their widget
+# skips a run).
 def _mc_dim_editable(key):
-    """True when the dimension's MC distribution has editable endpoints (uniform/tri/lognormal)."""
-    rng = m.TARGET_RANGES.get(key) or m.PARAM_RANGES.get(key)
-    return rng is not None and rng[0] in ("uniform", "triangular", "lognormal")
-
-
-def _default_mode(ekey):
-    """Initial range/spot mode (D-042): RANGE for dimensions with a tight ranged default
-    (SIM_DEFAULT), SPOT for point-default dimensions (pinned until the user widens them)."""
-    return ekey in m.SIM_DEFAULT
+    """True when the dimension's MC distribution has editable endpoints (uniform/tri/lognormal,
+    and — since the X-10 share dial — the scale_of share band, whose crop edits in share units)."""
+    rng = _base_rng(key)
+    return rng is not None and rng[0] in ("uniform", "triangular", "lognormal", "scale_of")
 
 
 def _default_span(ekey):
     """(lo, hi) endpoints of the D-042 DEFAULT simulation range in the key's natural units —
     the tight documented-source span, or (for POINT dims) the collapsed point at the USER'S
-    SPOT value: it matches the ghost bullet and the pin-at-spot MC behavior, and collapsing
-    the handles back onto the spot cleanly drops the override (re-pinning the dimension)."""
-    sim = m.SIM_DEFAULT.get(ekey)
-    if sim is not None and sim[0] != "scale_of":
+    SPOT value: the crop rides the playhead until widened, and collapsing the handles back
+    onto the spot cleanly drops the override (re-pinning the dimension)."""
+    sim = _sim_rng(ekey)
+    if sim is not None:
         return _tbounds_of(sim)
     fallback = TDEF[ekey] if ekey in m.TARGET_RANGES else getattr(P0, ekey)
     v = float(st.session_state.get(f"sv_{ekey}", fallback))
     return (v, v)
 
 
-def _range_mode(ekey):
-    return bool(st.session_state.get(f"rmv_{ekey}", _default_mode(ekey)))
+def _default_sampled(ekey):
+    """Initial state of the per-parameter MC tick (D-079 rider, Pavel): TICKED for the
+    dimensions the sampler draws by default (a ranged tight default — SIM_DEFAULT, which
+    also covers the scale_of band g_a_F and the D-080 coverage overlay), UNTICKED for
+    point-default dimensions."""
+    return _sim_rng(ekey) is not None
 
 
-def _commit_mode(ekey):
-    st.session_state[f"rmv_{ekey}"] = bool(st.session_state[f"rm_{ekey}"])
+def _sampled_on(ekey):
+    return bool(st.session_state.get(f"smpv_{ekey}", _default_sampled(ekey)))
+
+
+def _commit_sampled(ekey):
+    st.session_state[f"smpv_{ekey}"] = bool(st.session_state[f"smp_{ekey}"])
+
+
+def _mc_sampled(ekey):
+    """True when the MC actually draws this dimension (D-079 + rider): its tick is ON and
+    the crop is a REAL interval (a collapsed crop is a pin; point-default dims start with
+    the handles on the spot)."""
+    if not _sampled_on(ekey):
+        return False
+    lo, hi = _active_span(ekey)
+    return float(hi) > float(lo)
 
 
 def _reset_full(wkey, default, ekey):
-    """↺ on a dual-mode row: restore the spot value AND the default mode AND the default range."""
+    """↺ on a parameter row: restore the spot value AND the default crop AND the default
+    MC tick (popping the override is enough for the crop — the trim lane re-syncs from the
+    store every run)."""
     st.session_state[wkey] = default
     if ekey:
         st.session_state[f"sv_{ekey}"] = default
-        st.session_state[f"rmv_{ekey}"] = _default_mode(ekey)
-        st.session_state[f"rm_{ekey}"] = _default_mode(ekey)
+        st.session_state[f"smpv_{ekey}"] = _default_sampled(ekey)
+        st.session_state[f"smp_{ekey}"] = _default_sampled(ekey)
         st.session_state.setdefault("_range_over", {}).pop(ekey, None)
 
 
-def _commit_range_s(ekey, dflt):
-    """Sidebar range-slider callback → the same override store the calibration modal edits.
-    Returning the ends to the DEFAULT simulation range drops the override."""
-    v = st.session_state[f"srng_{ekey}"]
+def _spot_moved(ekey):
+    """Playhead release: a crop COLLAPSED TO A POINT is a PIN, and a pin IS the spot — so it
+    rides the playhead (returning to the default span drops the override, like a trim commit).
+    That is what a pinned dimension MEANS, not a constraint on the spot, which is why D-087
+    leaves it standing: a pinned dimension has no chosen MC range to protect.
+
+    A REAL crop is left alone entirely. Under D-079 the released spot was clamped to the crop's
+    nearest edge by a render-time guard in the row builders; D-087 retired that guard, so a spot
+    and a real crop now move independently in both directions."""
+    v = float(st.session_state[f"w_{ekey}"])
     over = st.session_state.setdefault("_range_over", {})
-    if abs(v[0] - dflt[0]) < 1e-9 and abs(v[1] - dflt[1]) < 1e-9:
+    cur = over.get(ekey)
+    if cur is None or abs(float(cur[1]) - float(cur[0])) > 1e-12:
+        return
+    dflt = _default_span(ekey)
+    if abs(v - dflt[0]) < 1e-9 and abs(v - dflt[1]) < 1e-9:
         over.pop(ekey, None)
     else:
-        over[ekey] = (float(v[0]), float(v[1]))
+        over[ekey] = (v, v)
+
+
+def _commit_range_s(ekey, dflt):
+    """Trim-lane commit (D-079) → the same override store the calibration modal edits. The
+    crop is clamped into the vetted ENVELOPE — the hard bound: the free-dial playhead bounds
+    the lane shares are hand-set and may exceed it. Returning the ends to the DEFAULT
+    simulation range drops the override. D-087: the SPOT is not touched — dragging a crop handle
+    across the playhead no longer pushes it along; the two controls are independent."""
+    v = st.session_state[f"srng_{ekey}"]
+    env_lo, env_hi = _tbounds_of(_base_rng(ekey))
+    lo = float(np.clip(v[0], env_lo, env_hi))
+    hi = float(np.clip(v[1], env_lo, env_hi))
+    over = st.session_state.setdefault("_range_over", {})
+    if abs(lo - dflt[0]) < 1e-9 and abs(hi - dflt[1]) < 1e-9:
+        over.pop(ekey, None)
+    else:
+        over[ekey] = (lo, hi)
 
 
 def _use_source(wkey, value, lo=None, hi=None):
-    """[use] in the calibration modal: write the source's value into the destination control.
-    Targets get the natural-units value (clipped to the slider bounds); free dials are set
-    directly. Runs as a callback, so writing widget state is safe."""
+    """Adopt a source's POINT: write its value into the destination control. Targets get the
+    natural-units value clipped to the slider bounds — the vetted ENVELOPE, which still bounds
+    the spot (D-087) — and free dials are set directly. Runs as a callback, so writing widget
+    state is safe.
+
+    D-087: the value lands EXACTLY. It used to be clipped a second time, at render, into the MC
+    crop, so adopting a lab figure outside today's crop silently produced the crop's edge rather
+    than the number the user clicked. That was the corner Pavel saw; independence removes it
+    instead of special-casing it."""
     if isinstance(value, str):
         st.session_state[wkey] = value
     else:

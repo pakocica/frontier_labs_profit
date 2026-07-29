@@ -7,7 +7,7 @@
 <title>Will Frontier AI Labs Be Profitable?</title>
 <!-- Shared tour styling (tokens + slides + navigator) — the SAME deck the laptop uses, so the
      phone shows identical content, single-sourced from tour.js. See deploy/tour.css / tour.js. -->
-<link rel="stylesheet" href="./tour.css?v=1">
+<link rel="stylesheet" href="./tour.css?v=2">
 <style>
   /* ============================================================================
      Phone guide (D-073) — ORIENTATION-RESPONSIVE, and GUIDE-ONLY (no widget, no
@@ -103,6 +103,8 @@
     color: var(--faint); font-family: var(--mono); font-size: 11.5px; letter-spacing: .03em; line-height: 1.5;
   }
   .guide .foot::before { content: ""; width: 22px; height: 1px; background: currentColor; flex: 0 0 auto; opacity: .7; }
+  /* the shared note link, kept to a readable column on a wide landscape phone */
+  #guide-note .note-link { max-width: 30rem; }
 </style>
 </head>
 <body>
@@ -116,17 +118,24 @@
       <div class="eyebrow">An interactive model</div>
       <h1 class="q-title">Will Frontier AI Labs Be Profitable?</h1>
       <p class="q-sub">A <span class="lead">leader</span> charges a premium for its lead &mdash; a <span class="foll">follower</span> sells the same at cost. When is the lead worth the bill for keeping it?</p>
+      <!-- the model note (D-097): the landscape title has no deck, so the shared link is
+           mounted here by the script below — same href/wording as everywhere else -->
+      <div id="guide-note"></div>
     </div>
     <p class="foot">Best on a larger screen &mdash; open on a laptop for the interactive explorer.</p>
   </main>
 
-  <script src="./tour.js?v=2"></script>
+  <script src="./tour.js?v=3"></script>
   <script>
   (function () {
     "use strict";
     // mount the SAME shared deck the laptop uses (env: phone → phone wording + the
     // phone-only "needs a bigger screen" slide). No widget, no close — terminal.
     var deck = window.FLPTour.mountDeck(document.getElementById("deck"), { env: "phone" });
+
+    // landscape title view: mount the same model-note link the deck slides carry
+    var gn = document.getElementById("guide-note");
+    if (gn && window.FLPTour.noteHTML) gn.innerHTML = window.FLPTour.noteHTML();
 
     // arrow keys advance the deck, but only while it's the visible (portrait) view
     window.addEventListener("keydown", function (e) {

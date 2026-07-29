@@ -8,8 +8,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from .model_access import m
-from .theme import (C_COST, C_FOLLOWER, C_GAP, C_GAP_MED, C_LEADER, C_PROFIT, C_REV,
-                    C_SAMPLE, _rgba)
+from .theme import (C_FOLLOWER, C_GAP, C_GAP_MED, C_LEADER, C_PROFIT, C_SAMPLE, YEAR0,
+                    _rgba)
 
 # ======================================================================= Monte Carlo (live)
 MC_BATCH = 4           # draws added per heartbeat tick (the component ticks every ~1.2s)
@@ -42,8 +42,17 @@ def _mc_theme():
 
 def _rl(a):
     """Round an array to 4 significant figures as a plain float list (None for non-finite); keeps
-    the embedded JSON small enough for the iframe srcdoc."""
+    the embedded JSON small enough for the iframe srcdoc. For Y-SERIES ONLY — never the time
+    grid (see _rlt)."""
     return [None if not np.isfinite(x) else float(f"{x:.4g}") for x in np.asarray(a, float)]
+
+
+def _rlt(a):
+    """The TIME grid, rounded to 4 DECIMALS — not significant figures. Under the calendar axis
+    (D-076, t + 2026) four significant figures is integer years, which collapsed every point
+    within a year onto one x and made the fans render as annual steps (Pavel's report,
+    2026-07-27). Fixed decimals keep the ~20 points/yr the draws actually carry."""
+    return [None if not np.isfinite(x) else round(float(x), 4) for x in np.asarray(a, float)]
 
 
 def _mc_refresh_snapshot(store, show_blowup, show_horizon=True):
@@ -57,25 +66,37 @@ def _mc_refresh_snapshot(store, show_blowup, show_horizon=True):
     t = np.asarray(draws[0]["t"], float)
     cr = np.array([dd["crossing"] for dd in draws], float)
     n_blow = int(sum(dd["blowup"] for dd in draws))
-    # D-047: the ONE stat the Finance tile shows — share of draws with positive profit at the
-    # horizon T (the end of each draw's profit path)
-    p_pos_T = float(np.mean([float(np.asarray(dd["profit"], float)[-1]) > 0.0
-                             for dd in draws]))
+    # D-047: the ONE stat the Finance tile shows. Computed from the SAME series the label and
+    # the fan describe — earnings vs model-building cost at the horizon (audit X-03: the old
+    # profit[-1] > 0 form was numerically identical under Π = E − B, but stat and label were
+    # different objects and would have diverged silently under any profit-only extension).
+    def _covers(dd):
+        if "revenue" in dd and "cost" in dd:
+            return (float(np.asarray(dd["revenue"], float)[-1])
+                    > float(np.asarray(dd["cost"], float)[-1]))
+        return float(np.asarray(dd["profit"], float)[-1]) > 0.0   # pre-D-068 record (reload)
+    p_pos_T = float(np.mean([_covers(dd) for dd in draws]))
+    # D-076: draws whose IMPLIED training-bill growth left the observed band [2.0, 2.9]×/yr were
+    # rejected and redrawn inside mc_draw_batch. Report the count — a constraint that silently
+    # truncates the joint prior would read as "we sampled everything" when we did not.
+    n_rej = int(sum(int(dd.get("rejects", 0)) for dd in draws))
     stats = {"p_prof": float(np.isfinite(cr).mean()),
              "med_cr": (float(np.nanmedian(cr[np.isfinite(cr)])) if np.isfinite(cr).any()
                         else float("nan")),
-             "n_blow": n_blow, "p_pos_T": p_pos_T}
+             "n_blow": n_blow, "p_pos_T": p_pos_T, "n_rej": n_rej}
     # Two-hue scheme: each panel's bands are light/mid shades of the series' OWN hue; the median
-    # is the saturated hue and its color never changes per draw. Gap = derived → grey family;
-    # cost shares its identity with the Finance panel (lighter blue, dashed median).
+    # is the saturated hue and its color never changes per draw. Gap = derived → grey family.
     # Entry: (key, title, ylab, median color, band hue, median dash, y-axis type).
+    # D-080: the three money fans (profit, revenue, cost) collapsed into ONE coverage fan —
+    # ρ_t = E_t/B_t in percent, the only identified finance outcome; break-even is the 100%
+    # refline (the component draws `refline` as a dashed hline). "coverage" is DERIVED here
+    # from the per-draw revenue/cost records — the notebook records are unchanged.
     # D-068 MC extension: fans for the Algo progress / Compute / Value tabs ride on the SAME
     # snapshot — the per-draw records already carry a_L/a_F, c_L/c_F and W_R/W_F (one series
     # per fan chart, leader vs follower stacked vertically per Pavel's no-side-by-side rule).
-    CH = [("profit", "Profit flow  Π  ($B/yr)", "$/yr  ($B)", C_PROFIT, C_PROFIT, "solid", None),
+    CH = [("coverage", "Coverage — earnings ÷ model-building cost  (%)", "%",
+           C_PROFIT, C_PROFIT, "solid", None),
           ("Delta", "Capability gap  Δ = xᴸ − xᶠ  (OOM)", "OOM", C_GAP_MED, C_GAP, "solid", None),
-          ("revenue", "Revenue  (gap rent, $B/yr)", "$/yr  ($B)", C_REV, C_REV, "solid", None),
-          ("cost", "Cost  ($B/yr)", "$/yr  ($B)", C_COST, C_COST, "dash", None),
           ("a_L", "Algo progress — leader  aᴸ", "OOM above 2026 frontier",
            C_LEADER, C_LEADER, "solid", None),
           ("a_F", "Algo progress — follower  aᶠ", "OOM above 2026 frontier",
@@ -84,15 +105,24 @@ def _mc_refresh_snapshot(store, show_blowup, show_horizon=True):
            C_LEADER, C_LEADER, "solid", None),
           ("c_F", "Compute — follower  cᶠ", "OOM above 2026 frontier",
            C_FOLLOWER, C_FOLLOWER, "solid", None),
-          ("W_R", "Value — leader served  W(xᴿ)  ($B/yr, log)", "$/yr  ($B, log)",
+          ("W_R", "Value index — leader  W(xᴸ)  (× today, log)", "× today  (log)",
            C_LEADER, C_LEADER, "solid", "log"),
-          ("W_F", "Value — follower  W(xᶠ)  ($B/yr, log)", "$/yr  ($B, log)",
+          ("W_F", "Value index — fringe  W(xᶠ)  (× today, log)", "× today  (log)",
            C_FOLLOWER, C_FOLLOWER, "solid", "log")]
     charts = []
     nan_path = np.full_like(np.asarray(draws[0]["profit"], float), np.nan)
-    for key, title, ylab, color, bhue, mdash, ytype in CH:
+
+    def _series(dd, key):
+        # coverage is DERIVED per draw (D-080): ρ = 100·revenue/cost — the records are unchanged
+        if key == "coverage":
+            with np.errstate(divide="ignore", invalid="ignore"):
+                return 100.0 * (np.asarray(dd.get("revenue", nan_path), float)
+                                / np.asarray(dd.get("cost", nan_path), float))
         # .get guard: a store carried across a code reload may hold pre-D-068 records
-        A = np.array([np.asarray(dd.get(key, nan_path), float) for dd in draws])
+        return np.asarray(dd.get(key, nan_path), float)
+
+    for key, title, ylab, color, bhue, mdash, ytype in CH:
+        A = np.array([_series(dd, key) for dd in draws])
         A = np.where(np.isfinite(A), A, np.nan)
         if np.isnan(A).all():
             lo5 = lo25 = med = hi75 = hi95 = nan_path
@@ -111,19 +141,22 @@ def _mc_refresh_snapshot(store, show_blowup, show_horizon=True):
             yr = [lo_v - 0.08 * span, hi_v + 0.08 * span]
         else:
             yr = [0.0, 1.0]
-        if key == "profit":
-            # 0 must stay inside the profit panel's range (the axis zeroline marks break-even;
-            # no plotted zero line) even when every band is single-signed
-            yr = [min(yr[0], 0.0), max(yr[1], 0.0)]
+        refline = None
+        if key == "coverage":
+            # 100% = break-even must stay inside the range (the component draws `refline`
+            # as a dashed annotated hline) even when every band is single-signed
+            yr = [min(yr[0], 90.0), max(yr[1], 110.0)]
+            refline = dict(y=100.0, text="break-even (100%)")
         charts.append(dict(key=key, title=title, ylab=ylab, color=color, mdash=mdash,
-                           ytype=ytype,
+                           ytype=ytype, refline=refline,
                            band_light=_rgba(bhue, 0.12), band_mid=_rgba(bhue, 0.30), yrange=yr,
                            lo5=_rl(lo5), lo25=_rl(lo25), med=_rl(med), hi75=_rl(hi75),
                            hi95=_rl(hi95)))
     # (no per-draw embedding: the inspected sample's series are injected at render time by
     # mc_render, and its parameter values surface as dashed ticks on the sidebar range controls)
     next_ms = next((msn for msn in MC_MILESTONES if msn > n), None)
-    store["snapshot"] = dict(t=_rl(t), charts=charts, n=n, next_ms=next_ms,
+    # calendar x-axis (D-076): the fans share the point charts' axis convention, 2026 + t
+    store["snapshot"] = dict(t=_rlt(t + YEAR0), charts=charts, n=n, next_ms=next_ms,
                              stopped=store["stopped"], stats=stats, show_blowup=bool(show_blowup),
                              show_horizon=bool(show_horizon))
     store["band_n"] = n
@@ -155,25 +188,38 @@ def _mc_inspection(store):
 
 
 def _inspected_params():
-    """Raw sampled values of the currently inspected MC draw (empty when not inspecting) — the
-    sidebar renders these as dashed ticks on the range controls."""
+    """Sampled values of the currently inspected MC draw (empty when not inspecting) — the
+    sidebar renders these as dashed ticks on the range controls, keyed by DIAL key.
+
+    The coverage dimension needs the inverse of `mc_prepare`'s forward map: the dial is app-side
+    and in PERCENT (D-080), while the sampler draws the Params field `rho` — a fraction — so
+    every stored draw carries `rho` and never `cov0`. Without the map back, the one drawn MONEY
+    dial — the headline output's own row — is the only row whose ⊙ tick never appears
+    (2026-07-28 functionality test F-4). Since D-093 the map is the unit conversion alone: the
+    hidden constant k it used to divide through is gone with the (R₀, m, k) triple."""
     store = st.session_state.get("_mc_store") or {}
     show, i = _mc_inspection(store)
-    return dict(store["draws"][i]["params"]) if show else {}
+    if not show:
+        return {}
+    out = dict(store["draws"][i]["params"])
+    if "rho" in out and "cov0" not in out:
+        out["cov0"] = 100.0 * float(out["rho"])
+    return out
 
 
-# Tile order (D-043 + Pavel's HARD RULE: never place graphs side by side): the FINANCE
-# instance stacks profit, revenue and cost VERTICALLY at full column width — the old
-# revenue|cost row collided titles/axes at narrow widths. The MODEL-PATH instance shows the
-# capability-gap fan. Indices refer to the snapshot's chart list (profit, Delta, revenue,
-# cost, a_L, a_F, c_L, c_F, W_R, W_F — built in _mc_refresh_snapshot). D-068 MC: the extra
-# level-gated tabs reuse the SAME display instance with their own grid.
-FIN_GRID = [[0], [2], [3]]
+# Tile order (D-043 + Pavel's HARD RULE: never place graphs side by side). D-080: the FINANCE
+# instance shows the ONE coverage fan — Pavel: "show only the coverage in the financial graphs
+# to bring attention to this most important output" (D-093 removed the dollar scale outright,
+# so a nominal view would now have to re-introduce it deliberately). The MODEL-PATH instance shows the capability-gap fan.
+# Indices refer to the snapshot's chart list (coverage, Delta, a_L, a_F, c_L, c_F, W_R, W_F —
+# built in _mc_refresh_snapshot). D-068 MC: the extra level-gated tabs reuse the SAME display
+# instance with their own grid.
+FIN_GRID = [[0]]
 PATH_GRID = [[1]]
-ALGO_GRID = [[4], [5]]
-COMP_GRID_L = [[6]]          # < L6: the follower's compute is not modeled yet
-COMP_GRID_BOTH = [[6], [7]]
-VALUE_GRID = [[8], [9]]
+ALGO_GRID = [[2], [3]]
+COMP_GRID_L = [[4]]          # < L3: the follower's compute is not modeled yet
+COMP_GRID_BOTH = [[4], [5]]
+VALUE_GRID = [[6], [7]]
 
 
 def _mc_store(mc_key):
@@ -190,9 +236,12 @@ def _mc_payload(store, snap, *, grid, corner, heartbeat, visible):
     sampled = None
     if show:
         dd = store["draws"][i]
-        sampled = {k: _rl(dd[k]) for k in ("profit", "Delta", "revenue", "cost",
-                                           "a_L", "a_F", "c_L", "c_F", "W_R", "W_F")
+        sampled = {k: _rl(dd[k]) for k in ("Delta", "a_L", "a_F", "c_L", "c_F", "W_R", "W_F")
                    if k in dd}
+        if "revenue" in dd and "cost" in dd:   # the coverage fan's inspected series (D-080)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                sampled["coverage"] = _rl(100.0 * np.asarray(dd["revenue"], float)
+                                          / np.asarray(dd["cost"], float))
     return dict(t=(snap["t"] if snap else []), charts=(snap["charts"] if snap else []),
                 grid=grid, corner=bool(corner), heartbeat=bool(heartbeat),
                 visible=bool(visible and snap is not None),
@@ -205,14 +254,21 @@ def _mc_payload(store, snap, *, grid, corner, heartbeat, visible):
 # The one-line MC explainer (round 3): the "How to read the Monte-Carlo fans" expander is
 # gone — its content, condensed, lives in the headline's native help tooltip instead.
 _MC_HELP = (
-    "**Share of draws whose profit flow is positive at the horizon $T$.**\n\n"
+    "**Share of draws whose coverage ρ = earnings ÷ model-building cost exceeds 100% at the "
+    "horizon $T$** (equivalently: whose profit flow is positive there — "
+    "$\\Pi_t > 0 \\iff \\rho_t > 1$).\n\n"
     "**How the Monte-Carlo fans work.** Draws accumulate live over the documented sampling "
     "ranges; each fan shows the **median**, a mid-shade **25–75%** band and a light **5–95%** "
-    "band. Only the dimensions with a documented range at the current level are sampled — "
-    "targets in natural units (inverted per draw), free dials in parameter space; everything "
-    "else stays pinned. Default ranges are tight (the span of the sources); single-source "
-    "dimensions start pinned at a point until you widen them. y-axes fit the mid 25–75% band, "
-    "so extreme upper-tail draws sit off-frame. Bands and this stat refresh only at round draw "
+    "band. Each parameter row's TICK decides what the draws do with it: ticked, they sweep "
+    "its trim crop — targets in natural units (inverted per draw), free dials in parameter "
+    "space; unticked, every draw pins it at the spot value. Default ranges are tight (the "
+    "span of the sources); single-source dimensions start unticked until you tick and widen "
+    "them. y-axes fit the mid 25–75% band, so extreme upper-tail draws sit off-frame.\n\n"
+    "**Coherence.** Compute growth and price-performance are drawn independently, but their "
+    "difference is itself observed — the training bill grows 2.4×/yr (90% CI [2.0, 2.9]). Draws "
+    "implying a bill outside that band are rejected and redrawn; the count is reported beside "
+    "the stat rather than silently dropped.\n\n"
+    f"Bands and this stat refresh only at round draw "
     f"counts (10, 20, 50, 100) and drawing stops at {MC_CAP}; once done, the **⊙ control** in "
     "the chart corner steps through inspected draws (dashed ticks on the sidebar range "
     "controls). Any value, range or mode change restarts the accumulation. Profit is an "
@@ -230,8 +286,13 @@ def mc_headline(mc_key, show_blowup=True):
         st.markdown("**MC simulation:** starting the draws…", help=_MC_HELP)
         return
     pct = snap["stats"].get("p_pos_T", float("nan")) * 100.0
+    n_rej = int(snap["stats"].get("n_rej", 0))
     if np.isfinite(pct):
-        st.markdown(f"**MC simulation:** {pct:.0f}% profitable at $T$", help=_MC_HELP)
+        txt = f"**MC simulation:** {pct:.0f}% of draws cover their build cost at $T$"
+        if n_rej:
+            txt += (f" &nbsp;:gray[· {n_rej} draw{'s' if n_rej != 1 else ''} rejected "
+                    "(coherence)]")
+        st.markdown(txt, help=_MC_HELP)
 
 
 def mc_panel_fin(mc_key, visible, show_blowup=True):
@@ -325,24 +386,40 @@ def mc_prepare(d, LEVEL):
     """The effective Monte-Carlo context for this run — computed on EVERY run (D-043: the
     accumulation runs in the background whatever the mode). The cache key is the FULL
     effective tuple — level, every effective parameter, the active sampling ranges, and the
-    sampled set — so ANY change (spot values, range ends, mode-of-record toggles, [choose],
-    resets, level switches) restarts the accumulation from n=0.
+    sampled set — so ANY change (spot values, crop ends, crop collapses, [choose], resets,
+    level switches) restarts the accumulation from n=0.
 
     Returns (mc_key, sample_keys, merge_delta, target_ranges, param_ranges)."""
-    from .levels import level_sample_keys
-    from .state import _active_ranges, _active_rng, _mc_dim_editable, _range_mode
+    from .levels import level_sample_keys, merged_delta
+    from .state import (_active_ranges, _active_rng, _mc_dim_editable, _mc_sampled,
+                        _sampled_on)
 
     def _pinned_dim(k):
-        """A dimension leaves the sampled set in SPOT mode, or when its D-042 default is a
-        POINT that the user hasn't widened."""
-        if not _range_mode(k):
-            return True
-        return _active_rng(k)[0] is None and _mc_dim_editable(k)   # POINT, no user range yet
+        """A dimension leaves the sampled set when its per-parameter MC tick is OFF (D-079
+        rider: unticked = every draw pins it at the spot) or its trim crop is COLLAPSED TO A
+        POINT (point-default dims start with both handles on the spot until widened). Since
+        the X-10 share dial, scale_of dims (g_a_F) are editable like any uniform band — in
+        share units; only choice-kind dims (the eta menu) keep the no-lane fallback: with
+        the tick on they sample exactly when a default distribution exists, else stay
+        pinned."""
+        if not _mc_dim_editable(k):
+            return not _sampled_on(k) or _active_rng(k)[0] is None
+        return not _mc_sampled(k)
 
     sample_keys = [k for k in level_sample_keys(LEVEL) if not _pinned_dim(k)]
-    merge_delta = LEVEL <= 5
+    merge_delta = merged_delta(LEVEL)   # named predicate (X-18): one renumbering-safe gate
     _over = st.session_state.get("_range_over", {})
     tro, pro = _active_ranges()
+    # D-080: the COVERAGE dimension is app-side (state.APP_RANGES) and in PERCENT, while the
+    # Params field `rho` is the fraction — so the crop is converted here and the sampler draws
+    # `rho`. A uniform crop in percent IS a uniform draw in the fraction (the map is linear),
+    # which is what lets the trim lane mean exactly what it shows. D-093: one draw dimension
+    # because there is now one money PARAMETER, not because two of three were pinned.
+    if "cov0" in sample_keys:
+        from .state import _active_rng, _tbounds_of
+        lo, hi = _tbounds_of(_active_rng("cov0")[0])
+        pro["rho"] = ("uniform", lo / 100.0, hi / 100.0)
+        sample_keys = ["rho" if k == "cov0" else k for k in sample_keys]
     mc_key = ((LEVEL,) + tuple(sorted(d.items()))
               + ("RANGES",) + tuple(sorted(_over.items()))
               + ("KEYS",) + tuple(sample_keys))

@@ -107,27 +107,21 @@ def inject_base_css():
     )
 
 
-def inject_mc_slider_css():
-    # Uniform fill language on the Monte-Carlo view (Pavel's design, D-042 follow-up): SOLID
-    # always means "the active selection". A SPOT slider's min→thumb fill is de-emphasized
-    # (the whole ~4px track div — one element carrying the fill gradient — drops to 35%
-    # opacity, leaving the full-opacity thumb as the only salient mark); a RANGE slider keeps
-    # the default look, whose between-handles segment is already the solid selection and the
-    # outer segments already faint. Ordinary sliders outside this view are untouched.
-    st.markdown(
-        """
-        <style>
-          section[data-testid="stSidebar"] [data-testid="stSlider"]
-            div[role="group"] > div > div:first-child { opacity: 0.35; }
-          section[data-testid="stSidebar"] [class*="st-key-srng_"] [data-testid="stSlider"]
-            div[role="group"] > div > div:first-child { opacity: 1; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
 # ======================================================================= plotly helper
+# ---- calendar time axis (D-076; Pavel's "one important decision", 2026-07-26) ----------------
+# t = 0 is early 2026 (spec N1), and the whole model is calibrated TO 2026 — so every time axis
+# shows CALENDAR YEARS (2026 … 2031/2036), never 0–5/0–10. Model time stays the internal unit;
+# only the plotted x-values are shifted. (A backcast prefix showing 2023–2026 against the data is
+# a parked feature.)
+YEAR0 = 2026
+
+
+def cal(t):
+    """Model time (years since t = 0) → calendar year, for plotting only."""
+    import numpy as np
+    return np.asarray(t, dtype=float) + YEAR0
+
+
 def fig_base(title, xlabel, ylabel, height=230):
     """Theme-neutral figure sized for the narrow right chart panel (D-047): compact margins
     and fonts, title pinned to the container top with the legend on its own row below it.
@@ -147,8 +141,10 @@ def fig_base(title, xlabel, ylabel, height=230):
         legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1.0,
                     font=dict(size=9)),
     )
+    # tickformat "d": calendar years must render as 2026, never as the locale's "2,026"
     fig.update_xaxes(title_text=xlabel, zeroline=True, automargin=True,
-                     title_font=dict(size=10))
+                     title_font=dict(size=10),
+                     **(dict(tickformat="d") if xlabel == "year" else {}))
     # automargin so a long y-axis title grows the margin instead of clipping at the tile edge
     fig.update_yaxes(title_text=ylabel, zeroline=True, automargin=True,
                      title_font=dict(size=10))
@@ -195,7 +191,7 @@ def tab_intro(what, how):
 #   · the LEFT panel (st.sidebar) gets the IDENTICAL mechanism (Pavel, v2): its native chrome —
 #     re-resizable drag handle, « collapse button, collapsed control — is suppressed and the
 #     same controller drives --sb-w / display:none + strip; Streamlit-side the sidebar stays
-#     "expanded" forever, so its content (and every sv_/rmv_ state pattern) is always mounted.
+#     "expanded" forever, so its content (and every sv_ state pattern) is always mounted.
 SIDEBAR_DEFAULT_PX = 300                              # Streamlit's real re-resizable default
 PANEL_SCALE = 1.10                                    # "+10%" (Pavel)
 PANEL_W_PX = round(SIDEBAR_DEFAULT_PX * PANEL_SCALE)  # 330 — the shared default width
@@ -204,6 +200,16 @@ PANEL_SNAP_PX = 220     # released below this width → the panel snaps closed (
 PANEL_W_MIN_PX = PANEL_SNAP_PX                        # expanded drag clamp: [SNAP, MAX]
 PANEL_W_MAX_PX = 560
 PANEL_STRIP_PX = 26                                   # collapsed strip width (both panels)
+# D-100 (Pavel): the panels "tend to stick to the default width". The default itself is unchanged
+# — PANEL_W_REM × the current font, which is capped, so it grows with the window and then holds.
+# (A quarter-of-the-window default was tried and withdrawn: Pavel had forgotten the cap, and the
+# fraction keeps growing past it.) Sticky means three things: the divider PARKS at the default
+# while dragging within PANEL_SNAP_DEF_PX of it, so the magnet is visible rather than only
+# resolving on release; releasing there drops the absolute pin so the panel keeps tracking the
+# font afterwards instead of freezing at "almost default"; and double-clicking the divider resets
+# a pin from anywhere.
+PANEL_SNAP_DEF_PX = 24  # magnet radius; wide enough to catch a near-miss, narrow enough that a
+                        # deliberate small adjustment near the default still pins
 
 # D-051: fluid-font canvas (Pavel's chosen "D" system). On a wide monitor the whole app UI
 # ZOOMS — root font-size = clamp(viewport / FONT_CANVAS_REM, FONT_BASE_PX, FONT_MAX_PX) — so the
@@ -250,6 +256,7 @@ _D050_JS = r"""
 <script>(function () { try {
   var w = window.parent || window, d = w.document, ls = w.localStorage, R = d.documentElement;
   var SNAP = __SNAP__, MIN = __MIN__, MAX = __MAX__, STRIP = __STRIP__, DEF = __DEF__;
+  var SNAP_DEF = __SNAPDEF__;   /* (D-100) the default's magnet radius — see the drag handlers */
   var FBASE = __FBASE__, FMAX = __FMAX__, FCANVAS = __FCANVAS__, PWREM = __PWREM__;
   var NARROW = __NARROW__, PHONE = __PHONE__;   /* (D-051) responsive-mode viewport thresholds */
 
@@ -259,7 +266,14 @@ _D050_JS = r"""
   var curFont = FBASE;
   function calcFont() { return Math.max(FBASE, Math.min(FMAX, w.innerWidth / FCANVAS)); }
   function applyFont() { curFont = calcFont(); R.style.fontSize = curFont + 'px'; }
-  function defW() { return Math.round(PWREM * curFont); }   /* rem-derived default panel width */
+  /* The rem-derived default: PWREM × the current font, and the font is itself a CAPPED function
+     of the viewport — so the panel grows with the window and then holds, which is the behaviour
+     Pavel wanted all along. (D-100 briefly made this a quarter of the window on his request; he
+     withdrew it on remembering the cap — "the previous default width made sense". The quarter
+     form is not equivalent: it keeps growing past the cap. What survives from that round is the
+     STICKINESS below, which is what he was actually after.) Panels TEND to this value: unpinned
+     ones re-evaluate it on every resize via the __d050Applies registry. */
+  function defW() { return Math.round(PWREM * curFont); }
   applyFont();
 
   /* Graph-height reconciler (Pavel 2026-07-24, replaces the D-051/D-054/D-068 dynamic sizer).
@@ -348,24 +362,22 @@ _D050_JS = r"""
   /* the injected 'Graphs' tab (narrow/phone only, CSS-shown) appended beside the real pane tabs,
      and a × on the overlay. Re-added by the observer if a rerun reconciles them away. */
   function ensureGraphs() {
-    /* the Graphs overlay lives with the Intro/Equations tabs; when the calibration panel opens
-       the tabbed pane folds away (no .st-key-pane_tab), so close the overlay too — otherwise it
-       would cover the calibration panel */
-    if (graphsOpen && !d.querySelector('.st-key-pane_tab')) { graphsOpen = false; applyMode(); }
-    /* (D-052) fallback selector: the stlite web build bundles Streamlit 1.57, whose segmented
-       buttons may not carry data-variant — any pane_tab button then anchors the injected tab */
-    var real = d.querySelector('.st-key-pane_tab button[data-variant="segmented_control"]') ||
-               d.querySelector('.st-key-pane_tab button');
-    if (real && !d.getElementById('graphsTab')) {
+    /* the Graphs overlay lives with the equations pane; when the calibration panel opens the
+       pane folds away (no .st-key-mainpane — round 2: the pane_tab switch that used to be the
+       marker is gone), so close the overlay too — otherwise it would cover the panel */
+    if (graphsOpen && !d.querySelector('.st-key-mainpane')) { graphsOpen = false; applyMode(); }
+    /* (round 2) the injected narrow/phone Graphs toggle anchors on the TOP STRIP now (the
+       pane tabs it used to ride beside are gone); it is a standalone pill, styled in CSS
+       rather than by copying a live segmented-button class */
+    var bar = d.querySelector('.st-key-topbar');
+    if (bar && !d.getElementById('graphsTab')) {
       var b = d.createElement('button');
       b.id = 'graphsTab'; b.type = 'button'; b.textContent = 'Graphs';
-      b.className = real.className;                 /* copy the live (hashed) segmented-button look */
-      b.setAttribute('data-variant', 'segmented_control');
       /* poke twice: charts that first laid out while the column was display:none need a
          resize to paint, and a second delayed poke covers the show transition */
       on(b, 'click', function () { graphsOpen = true; applyMode(); poke();
         w.setTimeout(poke, 260); plotlyFitSoon(); });   /* (D-054) snap charts to overlay width */
-      real.parentElement.appendChild(b);
+      bar.appendChild(b);
     }
     var col = d.querySelector('.st-key-chartscol');
     if (col && !d.getElementById('graphsClose')) {
@@ -402,13 +414,28 @@ _D050_JS = r"""
        re-added by the observer after reruns. On :8501 (no overlay host) the hook is absent,
        so the click is a graceful no-op. */
     var titleBar = d.querySelector('.st-key-apptitle');
-    if (titleBar && !d.getElementById('tourInfo')) {
-      var ib = d.createElement('button');
-      ib.id = 'tourInfo'; ib.type = 'button'; ib.textContent = 'ⓘ';   /* ⓘ */
-      ib.title = 'About this explorer — replay the introduction';
-      ib.setAttribute('aria-label', 'Replay the introduction');
-      on(ib, 'click', function () { if (w.__flpOpenTour) w.__flpOpenTour(); });
-      titleBar.appendChild(ib);
+    if (titleBar && !d.getElementById('titleLinks') && w.__flpOpenTour) {
+      /* (D-101, Pavel) TWO LABELLED buttons right of the title — "Intro Tour" and "Model Note" —
+         replacing the bare ⓘ. A lone glyph is the least discoverable control there is, and ⓘ
+         reads as "about" rather than "replay the guided tour"; the words are what stop the option
+         being missed. Both are gated on `__flpOpenTour`, i.e. on the deploy HOST being present:
+         it defines the tour and serves the PDF, so on a bare :8501 neither target exists and
+         rendering a button that silently does nothing is indistinguishable from a broken one —
+         which is exactly how the old ⓘ was reported. Preview the host layer with
+         deploy/preview.sh. The note href is RELATIVE: the site is served from a sub-path, so a
+         root-relative /model_note.pdf 404s live (D-097). */
+      var box = d.createElement('div');
+      box.id = 'titleLinks';
+      var tb = d.createElement('button');
+      tb.className = 'title-lnk'; tb.type = 'button'; tb.textContent = 'Intro Tour';
+      tb.title = 'Replay the introduction';
+      on(tb, 'click', function () { w.__flpOpenTour(); });
+      var nb = d.createElement('a');
+      nb.className = 'title-lnk'; nb.textContent = 'Model Note';
+      nb.href = './model_note.pdf'; nb.target = '_blank'; nb.rel = 'noopener';
+      nb.title = 'The model note (PDF) — the paper companion to this explorer';
+      box.appendChild(tb); box.appendChild(nb);
+      titleBar.appendChild(box);
     }
   }
 
@@ -428,9 +455,15 @@ _D050_JS = r"""
      host page's instanceof guards — browser-verified) */
   function poke() { try { w.dispatchEvent(new w.Event('resize')); } catch (e) {} } /* plotly */
 
-  /* (D-049) the level selector stays click/arrow-navigable but not typable */
-  function lvlFix() {
-    d.querySelectorAll('.st-key-topbar [data-testid="stSelectbox"] input').forEach(function (el) {
+  /* (D-049, widened by D-084) EVERY menu is a plain menu: click/arrow-navigable, never typable.
+     Streamlit 1.59 renders st.selectbox as an editable combobox — the input is writable and shows
+     a text caret, so a menu reads as a text field (Pavel's screenshot of the η row, 2026-07-28).
+     The D-049 fix existed but was scoped to `.st-key-topbar`, so it only ever covered the level
+     selector; the sidebar's η menu (and any menu added later) kept the default. Selector widened
+     to every stSelectbox in the document — the MutationObserver below re-applies it after each
+     rerun, so newly mounted menus are covered too. */
+  function menuFix() {
+    d.querySelectorAll('[data-testid="stSelectbox"] input').forEach(function (el) {
       el.readOnly = true; el.setAttribute('inputmode', 'none'); el.style.caretColor = 'transparent'; });
   }
 
@@ -449,6 +482,10 @@ _D050_JS = r"""
     function apply() { R.style.setProperty(varName, (C ? STRIP : (hasW ? W : defW())) + 'px');
       if (C) R.setAttribute(aC, '1'); else R.removeAttribute(aC); }
     function save() { hasW = true; ls.setItem(kW, String(W)); ls.setItem(kC, C ? '1' : '0'); }
+    /* (D-100) drop the absolute pin: the panel returns to defW() and resumes tracking the window
+       on every resize. The collapse flag is still persisted — unpinning is about WIDTH only. */
+    function unpin() { hasW = false; try { ls.removeItem(kW); } catch (e) {}
+      ls.setItem(kC, C ? '1' : '0'); }
     (w.__d050Applies || (w.__d050Applies = [])).push(apply);   /* resize → re-eval rem default */
     apply();
     var arrOpen = fromLeft ? '\u00bb' : '\u00ab';   /* strip arrow points the OPEN direction */
@@ -458,7 +495,9 @@ _D050_JS = r"""
     on(strip, 'click', function () { C = false; apply(); save(); poke(); });
     var closer = mk(side + 'Close', closeGlyph, closeTitle);
     on(closer, 'click', function () { C = true; apply(); save(); });
-    var div = mk(side + 'Divider', '', 'drag to resize; release narrow to collapse');
+    var div = mk(side + 'Divider', '',
+      'drag to resize · release near the default to re-centre · double-click to reset '
+      + '· release narrow to collapse');
     var drag = null;
     on(div, 'pointerdown', function (e) { e.preventDefault();
       if (!hasW) W = defW();             /* seed from the live rem default before the first drag */
@@ -468,12 +507,30 @@ _D050_JS = r"""
     on(div, 'pointermove', function (e) { if (!drag) return;
       var nw = fromLeft ? e.clientX : (w.innerWidth - e.clientX);
       if (nw < SNAP) { C = true; }                                  /* live snap preview */
-      else { C = false; W = Math.round(Math.min(MAX, Math.max(MIN, nw))); }
+      else { C = false;
+        nw = Math.min(MAX, Math.max(MIN, nw));
+        /* (D-100 round 2, Pavel) LIVE magnet: while the pointer is inside the snap zone the
+           divider visibly PARKS at the default, so the stickiness is felt during the drag rather
+           than only resolving on release — "I'm used to sticky in the sense that the user sees
+           when being near that value as the way it moves it tends to stick". Escaping it takes a
+           deliberate pull past SNAP_DEF. The release path then unpins by the same test, so what
+           the user saw is what gets stored. */
+        var dw = defW();
+        W = Math.round(Math.abs(nw - dw) <= SNAP_DEF ? dw : nw); }
       apply(); });
     function end() { if (!drag) return;
       if (C) W = drag.w0;                /* strip reopens at the PRE-drag width, not the min */
-      drag = null; R.removeAttribute(aD); apply(); save(); poke(); }
+      drag = null; R.removeAttribute(aD);
+      /* (D-100) TEND TO THE DEFAULT: released within SNAP_DEF of the window-quarter default, the
+         panel unpins instead of storing "almost default" — so it keeps following the window
+         afterwards. Deliberate widths outside the snap zone still pin exactly as before. The
+         pin/unpin decision must precede apply(), which reads hasW. */
+      if (!C && Math.abs(W - defW()) <= SNAP_DEF) unpin(); else save();
+      apply(); poke(); }
     on(div, 'pointerup', end); on(div, 'pointercancel', end);
+    /* (D-100) double-click the divider = back to the default, the conventional escape hatch for
+       a pin the user no longer wants (and the only way back to it from outside the snap zone). */
+    on(div, 'dblclick', function (e) { e.preventDefault(); C = false; unpin(); apply(); poke(); });
   }
   panel('charts', 'd050Charts', '--charts-w', false, 'CHARTS',
         'open the chart panel', '\u00bb', 'collapse the chart panel');
@@ -487,13 +544,8 @@ _D050_JS = r"""
   on(w, 'resize', function () { applyFont(); applyMode();
     (w.__d050Applies || []).forEach(function (f) { f(); }); sizeChartsSoon(); });
 
-  /* (D-051) executable Graphs wiring — here, AFTER the reset re-initialised __d050L so on()
-     can register. Picking a real text tab closes the charts overlay; then publish the mode. */
-  on(d, 'click', function (e) {
-    var t = e.target; if (!t || !t.closest) return;
-    var seg = t.closest('.st-key-pane_tab button');   /* (D-052) variant-attr-free: works on 1.57 too */
-    if (seg && seg.id !== 'graphsTab' && graphsOpen) { graphsOpen = false; applyMode(); }
-  });
+  /* (D-051 → round 2) the pane tabs whose clicks used to close the charts overlay are gone;
+     the overlay closes via its × or the mainpane-fold guard in ensureGraphs. */
   applyMode();
 
   /* the native sidebar must stay EXPANDED from Streamlit's point of view — our mechanism owns
@@ -517,37 +569,6 @@ _D050_JS = r"""
     if (os) R.setAttribute('data-sb-hover', '1'); else R.removeAttribute('data-sb-hover');
   });
 
-  /* the MC range/spot tick needs a visible hover explanation: its help= tooltip can NOT render
-     (collapsed label -> the whole stWidgetLabel incl. the tooltip icon is display:none,
-     verified live) and a native title on the label proved unreliable on macOS. So: a tiny
-     in-DOM tip, DELEGATED like the eq-hover listener, shown while the pointer is over any
-     st-key-rm_ tick; pointer-events:none so it never intercepts the click. */
-  function tickTip() {
-    var t = d.getElementById('tickTip');
-    if (!t) {
-      t = d.createElement('div'); t.id = 'tickTip';
-      t.textContent = 'Sample this parameter in the Monte Carlo? Ticked: the draws sweep ' +
-        'the sampling range set here (the deterministic paths keep the spot value). ' +
-        'Unticked: every draw pins it at the spot value.';
-      d.body.appendChild(t);
-    }
-    return t;
-  }
-  on(d, 'mouseover', function (e) {
-    var t = e.target; if (!t || !t.closest) return;
-    var host = t.closest('[class*="st-key-rm_"]');
-    var tip = tickTip();
-    if (!host) { tip.style.display = 'none'; return; }
-    var r = host.getBoundingClientRect();
-    tip.style.display = 'block';
-    tip.style.top = (r.bottom + 8) + 'px';
-    tip.style.left = Math.max(8, r.right - 280) + 'px';
-    /* safety: mouseover only fires on target CHANGES, so a resting pointer could leave a
-       stale tip up — auto-hide caps it */
-    if (w.__tickTipT) w.clearTimeout(w.__tickTipT);
-    w.__tickTipT = w.setTimeout(function () { tip.style.display = 'none'; }, 5000);
-  });
-
   /* (D-055) equations→parameters HOVER highlight — desktop only, DELEGATED (one listener) so it
      survives reruns and shim reinstalls with no per-node bookkeeping. Hovering an equations
      subsection (.st-key-eqsub_*) reads its hidden .eqhl-src marker (the mapped sidebar row keys)
@@ -567,15 +588,27 @@ _D050_JS = r"""
     if (!s) { s = d.createElement('style'); s.id = 'eqhlStyle'; d.head.appendChild(s); }
     return s;
   }
+  /* (D-078) a hovered subsection's rows also EXPAND (captions + tick labels re-shown) while
+     the hover lasts — the SAME rule body the server injects for the click-opened row, baked
+     in with an @ROW@ selector marker. Applied after a 150ms dwell: a quick pass-through
+     hover highlights instantly but never reflows the sidebar. */
+  var EXPAND_T = '__EXPANDT__';
   function eqSet(rows) {
     var s = eqStyleEl();
+    if (w.__eqExpT) { w.clearTimeout(w.__eqExpT); w.__eqExpT = 0; }
     if (!rows || !rows.length) { s.textContent = ''; R.removeAttribute('data-eqhover'); return; }
-    var sel = rows.map(function (rk) {
+    var hl = rows.map(function (rk) {
       return 'html[data-eqhover="1"] section[data-testid="stSidebar"] .st-key-' + rk;
-    }).join(',');
-    s.textContent = sel + '{opacity:1 !important;background:rgba(76,141,255,0.10);' +
-                    'outline:2px solid rgba(76,141,255,0.40);}';
+    }).join(',') + '{opacity:1 !important;background:rgba(76,141,255,0.10);' +
+                   'outline:2px solid rgba(76,141,255,0.40);}';
+    s.textContent = hl;
     R.setAttribute('data-eqhover', '1');
+    w.__eqExpT = w.setTimeout(function () {
+      s.textContent = hl + rows.map(function (rk) {
+        return EXPAND_T.split('@ROW@').join(
+          'html[data-eqhover="1"] section[data-testid="stSidebar"] .st-key-' + rk);
+      }).join('');
+    }, 150);
   }
   function eqClear() { w.__eqHost = null; eqSet([]); }
   on(d, 'mouseover', function (e) {
@@ -589,9 +622,40 @@ _D050_JS = r"""
   });
   eqClear();   /* clear any stale highlight carried across a shim reinstall */
 
+  /* (D-078, retargeted in round 2) LIVE value while dragging a sidebar slider. The value now
+     lives in the slider's OWN native stSliderThumbValue labels (the row-head cell is gone) —
+     but on 1.59 those labels do NOT track a mid-drag frame, while each thumb's react-aria
+     <input type="range"> updates aria-valuetext/value on EVERY frame (browser-verified,
+     D-078). So the observer mirrors each input into ITS label, pairwise by DOM order.
+     Self-referential by construction: a rerun render just rewrites a label with the text the
+     server rendered anyway, so the D-079 :active/mount-effect guards are unnecessary and
+     retired with the cross-target. On the stlite 1.57 bundle there are no range inputs
+     (BaseWeb thumbs) — the callback bails, and BaseWeb's labels track drags natively. */
+  function mirrorRow(el) {
+    if (!el || !el.closest) return;
+    var grp = el.closest('[data-testid="stSlider"]'); if (!grp) return;
+    if (!grp.closest('[class*="st-key-row_"]')) return;
+    var inputs = grp.querySelectorAll('input[type="range"]');
+    var labels = grp.querySelectorAll('[data-testid="stSliderThumbValue"]');
+    if (!inputs.length || labels.length < inputs.length) return;
+    inputs.forEach(function (inp, i) {
+      var s = inp.getAttribute('aria-valuetext') || inp.value || '';
+      if (s) labels[i].textContent = s;
+    });
+  }
+  /* attribute mutations ONLY: initial/rerun renders set attributes at node creation (no
+     mutation records), so the mirror never rewrites a label at rest — it fires exactly on the
+     drag frames (and on keyboard value changes, which want the same live echo). */
+  if (w.__d078VO) { try { w.__d078VO.disconnect(); } catch (e) {} }
+  w.__d078VO = new MutationObserver(function (muts) {
+    muts.forEach(function (mu) { mirrorRow(mu.target); });
+  });
+  w.__d078VO.observe(d.body, { subtree: true, attributes: true,
+                               attributeFilter: ['aria-valuetext', 'aria-valuenow'] });
+
   /* ---- ONE observer for everything that must survive reruns ---- */
-  lvlFix(); sbForceOpen(); ensureGraphs(); sizeChartsSoon();
-  w.__d050RO = new MutationObserver(function () { lvlFix(); sbForceOpen(); ensureGraphs(); sizeChartsSoon(); });
+  menuFix(); sbForceOpen(); ensureGraphs(); sizeChartsSoon();
+  w.__d050RO = new MutationObserver(function () { menuFix(); sbForceOpen(); ensureGraphs(); sizeChartsSoon(); });
   w.__d050RO.observe(d.body, { childList: true, subtree: true,
                                attributes: true, attributeFilter: ['aria-expanded'] });
 } catch (e) {} })();</script>
@@ -606,12 +670,16 @@ def _frontend_js_html():
         "MAX": str(PANEL_W_MAX_PX),
         "STRIP": str(PANEL_STRIP_PX),
         "DEF": str(PANEL_W_PX),
+        "SNAPDEF": str(PANEL_SNAP_DEF_PX),
         "FBASE": str(FONT_BASE_PX),
         "FMAX": str(FONT_MAX_PX),
         "FCANVAS": str(FONT_CANVAS_REM),
         "PWREM": str(PANEL_W_REM),
         "NARROW": str(NARROW_BP_PX),
         "PHONE": str(PHONE_BP_PX),
+        # D-078: the expanded-row rule body for the hover shim (single-quoted JS string —
+        # _row_expand_css emits no single quotes or newlines; `@ROW@` marks the selector)
+        "EXPANDT": _row_expand_css("@ROW@"),
     })
 
 
@@ -655,7 +723,7 @@ def _layout_css(light):
              inline width loses to !important; its drag handle and « button are hidden and
              replaced by our injected mirror controls), collapse = display:none + the strip.
              aria-expanded stays true forever, so the sidebar content is ALWAYS mounted and
-             the sv_/rmv_ hidden-row state patterns are untouched. */
+             the sv_ hidden-row state patterns are untouched. */
           section[data-testid="stSidebar"] {
             width: var(--sb-w) !important; min-width: var(--sb-w) !important;
             max-width: var(--sb-w) !important; transition: none !important; }
@@ -733,6 +801,11 @@ def _layout_css(light):
              inside the block, so the middle pane ends a gutter before it. The top padding
              clears the injected » collapse control. Collapsed, the panel is display:none
              (STILL MOUNTED — the MC component keeps ticking) and only the strip shows. */
+          /* the mode + horizon switches atop the charts panel (round 2): compact pills so the
+             two segmented controls share one row at the 330px default width */
+          .st-key-chartscol [data-testid="stButtonGroup"] button
+            { padding: 0.2rem 0.5rem; min-height: 1.8rem; font-size: 0.82rem; }
+          .st-key-chartscol [data-testid="stColumn"] { min-width: 0 !important; }
           .st-key-chartscol {
             position: fixed; top: 0; right: 0; width: var(--charts-w);
             height: 100vh; overflow-y: auto; overflow-x: hidden; z-index: 99;
@@ -806,15 +879,20 @@ def _layout_css(light):
             border: 1px solid rgba(128,128,128,0.15); }
           .st-key-apptitle div { margin: 0 !important; }
           /* (D-058) the ⓘ replay-intro control, pinned to the title bar's right edge */
-          #tourInfo { position: absolute; top: 50%; right: 0.7rem; transform: translateY(-50%);
-            width: 1.55rem; height: 1.55rem; border-radius: 999px; display: grid;
-            place-items: center; font-size: 0.95rem; line-height: 1; cursor: pointer;
-            opacity: 0.5; background: transparent; color: inherit;
+          /* (D-101) the two labelled title links, right-aligned on the title row */
+          #titleLinks { position: absolute; top: 50%; right: 0.7rem; transform: translateY(-50%);
+            display: flex; gap: 0.4rem; align-items: center; }
+          .title-lnk { padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.8rem;
+            line-height: 1.35; white-space: nowrap; cursor: pointer; text-decoration: none;
+            opacity: 0.72; background: transparent; color: inherit;
             border: 1px solid rgba(128,128,128,0.35);
-            transition: opacity 0.15s, color 0.15s, border-color 0.15s; }
-          #tourInfo:hover { opacity: 1; color: var(--accent); border-color: var(--accent); }
-          html[data-app-mode="phone"] #tourInfo { right: 0.4rem; width: 1.35rem; height: 1.35rem;
-            font-size: 0.82rem; }
+            transition: opacity 0.15s, color 0.15s, border-color 0.15s, background 0.15s; }
+          .title-lnk:hover { opacity: 1; color: var(--accent); border-color: var(--accent);
+            background: rgba(var(--accent-rgb),0.10); }
+          /* phone: the title row is tight, so shrink rather than wrap — two short labels still
+             fit where a wrapped pair would push the title itself out of the bar */
+          html[data-app-mode="phone"] #titleLinks { right: 0.4rem; gap: 0.25rem; }
+          html[data-app-mode="phone"] .title-lnk { padding: 0.1rem 0.4rem; font-size: 0.68rem; }
           /* the prose max-width cap (base CSS) would pin the title/footer text left — lift it */
           .st-key-apptitle [data-testid="stMarkdownContainer"],
           .st-key-appfooter [data-testid="stMarkdownContainer"]
@@ -944,12 +1022,6 @@ def _layout_css(light):
              rest; both target rows BY CLASS (not a JS-toggled node class) so they survive the
              background-MC reruns. Desktop only — the shim skips it in phone mode / on non-hover
              pointers. Mirrors the click-era calibration-emphasis look. */
-          /* the shim's in-DOM tooltip for the MC range/spot tick (its help= cannot render) */
-          #tickTip { display: none; position: fixed; z-index: 999999; max-width: 280px;
-            background: __TOPBAR_BG__; color: __TX__;
-            border: 1px solid rgba(128,128,128,0.4); border-radius: 8px;
-            padding: 0.45rem 0.6rem; font-size: 0.78rem; line-height: 1.35;
-            pointer-events: none; box-shadow: 0 4px 18px rgba(0,0,0,0.35); }
           .eqhl-src { display: none; }
           html[data-eqhover="1"] section[data-testid="stSidebar"] [class*="st-key-row_"]
             { opacity: 0.4; }
@@ -957,13 +1029,103 @@ def _layout_css(light):
           /* compact sidebar rows: tighter vertical rhythm + flush label lines */
           section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: 0.55rem; }
           section[data-testid="stSidebar"] [class*="st-key-row_"]
-            { padding: 2px 6px 4px; border-radius: 10px; }
+            { padding: 2px 6px 0.3rem; border-radius: 10px; }
           section[data-testid="stSidebar"] [class*="st-key-row_"] p { margin-bottom: 0; }
-          /* no thumb-value labels inside the compact rows: the current value already sits
-             right-aligned on the label line and the implied interval in the caption, so the
-             floating numbers only collided with the row text above (QA S7) */
+          /* ROUND 2 (Pavel): the value floats ABOVE the slider thumb — the native
+             stSliderThumbValue, re-enabled for playhead AND trim, point and MC alike (the
+             row-head value cell is gone). The QA-S7 collision (labels overprinting the row
+             text above) is re-solved with SPACING, not hiding: the label is small and the
+             slider element reserves headroom below the title. */
+          /* Pavel follow-up: the SPOT label reads larger; the trim labels' size below is
+             explicitly "perfect" and must stay — the trim rule overrides this one. The extra
+             headroom keeps the S7 clearance at the bigger size. */
           section[data-testid="stSidebar"] [class*="st-key-row_"]
-            [data-testid="stSliderThumbValue"] { display: none; }
+            [data-testid="stSliderThumbValue"]
+            { font-size: 0.8rem; opacity: 0.9; transform: translateY(-3px); }
+          section[data-testid="stSidebar"] [class*="st-key-row_"] [class*="st-key-w_"]
+            [data-testid="stSlider"] { margin-top: 0.7rem; }
+          /* the PLAYHEAD is a uniform rail (round 2, Pavel: the min→thumb fill "is confusing
+             once the mc interval is used" — it read as a second interval beside the crop
+             band). The fill gradient rides the track div's background; a flat neutral
+             background kills the fill and keeps the rail, in BOTH modes and themes. The crop
+             band (_crop_band's ::after) paints over it. */
+          section[data-testid="stSidebar"] [class*="st-key-row_"] [class*="st-key-w_"]
+            [data-testid="stSlider"] div[role="group"] > div > div:first-child
+            { background: rgba(128,128,128,0.30) !important; opacity: 1 !important; }
+          /* fill gone → the playhead bullet shrinks to the TRIM thumbs' size (Pavel), so the
+             two lanes' bullets match; same two thumb-DOM selectors as the trim rule below */
+          section[data-testid="stSidebar"] [class*="st-key-row_"] [class*="st-key-w_"]
+            [data-testid="stSlider"] div[role="slider"],
+          section[data-testid="stSidebar"] [class*="st-key-row_"] [class*="st-key-w_"]
+            [data-testid="stSlider"] div[role="group"] div:has(> div > input[type="range"])
+            { width: 0.65rem !important; height: 0.65rem !important; }
+          /* D-078 COLLAPSED-BY-DEFAULT rows (Pavel's redesign, replacing the 829b490 caption
+             pull whose "empty band" assumption caused the tick-label collision): a collapsed
+             row is title + value + slider + ↺ + » only. The min/max tick labels hide via
+             visibility (NOT display — the band keeps its height, so the slider geometry is
+             state-independent); the "⇒ …" caption(s) hide entirely. Both render EVERY run —
+             visibility is pure CSS, so the hover shim can expand a row with no rerun. The
+             EXPANDED state is `_row_expand_css` (!important declarations): injected per-run
+             for the click-opened row (sidebar.py) and transiently by the D-055 hover shim
+             for the rows of a hovered equations subsection. */
+          section[data-testid="stSidebar"] [class*="st-key-row_"]
+            [data-testid="stSliderTickBar"],
+          section[data-testid="stSidebar"] [class*="st-key-row_"]
+            [data-testid="stTickBar"] { visibility: hidden; }
+          section[data-testid="stSidebar"] [class*="st-key-row_"]
+            [data-testid="stElementContainer"]:has([data-testid="stCaptionContainer"])
+            { display: none; }
+          /* D-079 TRIM SCRUBBER (Pavel's film-editor metaphor, replacing the D-041 range/spot
+             mode tick): in MC mode every editable sampled row carries a slim two-handle TRIM
+             lane directly beneath the playhead — same bounds/step, same column split, so the
+             two tracks align position-for-position. Collapsed rows hide the interactive lane
+             entirely (the crop still shows as the shaded band the server paints on the
+             playhead track — sidebar._crop_band); the D-078 expand rule reveals it. */
+          section[data-testid="stSidebar"] [class*="st-key-trim_"] { display: none; }
+          /* fuse the lane to the playhead: pull it up into the space the playhead's
+             suppressed tick band vacates */
+          section[data-testid="stSidebar"] [class*="st-key-trim_"] { margin-top: -1.15rem; }
+          /* where a trim lane exists, the TRIM's tick band carries the (identical) min/max
+             labels; the playhead's own band would sit between the two fused tracks. display
+             (not visibility): the vacated height is what fuses the tracks, and display:none
+             also survives the D-078 expand rule, which re-shows bands via visibility/opacity
+             only. */
+          section[data-testid="stSidebar"] [class*="st-key-row_"]:has([class*="st-key-trim_"])
+            [class*="st-key-w_"] [data-testid="stSliderTickBar"],
+          section[data-testid="stSidebar"] [class*="st-key-row_"]:has([class*="st-key-trim_"])
+            [class*="st-key-w_"] [data-testid="stTickBar"] { display: none; }
+          /* trim-strip look: reduced thumbs (the native track already renders the crop as the
+             bright selected segment with dim outer segments). Two thumb DOMs: BaseWeb's
+             div[role="slider"] (the stlite 1.57 bundle) and 1.59's react-aria build, where
+             the visible round thumb is an emotion-hashed div only identifiable structurally —
+             the div whose grandchild is the range input (browser-verified). */
+          section[data-testid="stSidebar"] [class*="st-key-trim_"] [data-testid="stSlider"]
+            div[role="slider"],
+          section[data-testid="stSidebar"] [class*="st-key-trim_"] [data-testid="stSlider"]
+            div[role="group"] div:has(> div > input[type="range"])
+            { width: 0.65rem !important; height: 0.65rem !important; }
+          /* the crop's numbers ride the trim thumbs — SMALLER than the playhead's and lifted
+             for breathing room (round 2, Pavel: "too close to the trim slider") */
+          section[data-testid="stSidebar"] [class*="st-key-row_"] [class*="st-key-trim_"]
+            [data-testid="stSliderThumbValue"]
+            { font-size: 0.58rem; opacity: 0.8; transform: translateY(-3px); }
+          /* positioning context for the _crop_band ::before/::after track adornments */
+          section[data-testid="stSidebar"] [class*="st-key-row_"] [data-testid="stSlider"]
+            div[role="group"] { position: relative; }
+          /* the row TITLE is a real button (D-078: click = expand + reveal the equation
+             subsection): styled back to plain text — left-pinned, label-sized, no chrome.
+             Wins specificity over the generic row-button glyph rule below. */
+          section[data-testid="stSidebar"] [class*="st-key-row_"] [class*="st-key-t_row_"]
+            { min-width: 0; }
+          section[data-testid="stSidebar"] [class*="st-key-row_"] [class*="st-key-t_row_"]
+            button
+            { display: flex; width: 100%; justify-content: flex-start; text-align: left;
+              padding: 0; min-height: 1.2rem; font-size: 0.92rem; opacity: 0.9;
+              color: inherit; }
+          section[data-testid="stSidebar"] [class*="st-key-row_"] [class*="st-key-t_row_"]
+            button p { font-size: 0.92rem; }
+          section[data-testid="stSidebar"] [class*="st-key-row_"] [class*="st-key-t_row_"]
+            button:hover { opacity: 1; color: var(--accent); }
           /* slightly smaller row labels so each stays on ONE line in the ~215px label cell;
              captions get their own (smaller) size back since the label rule would inflate them */
           section[data-testid="stSidebar"] [class*="st-key-row_"]
@@ -972,7 +1134,7 @@ def _layout_css(light):
             [data-testid="stCaptionContainer"] p { font-size: 0.78rem; }
           /* per-row ↺: level with the slider (center-aligned columns) and pulled in toward the
              track's right edge — the column gap alone left it hanging too far right (Pavel).
-             [class*="st-key-r_"] needs the literal "st-key-r_" so row_/rm_/srng_ keys don't match. */
+             [class*="st-key-r_"] needs the literal "st-key-r_" so row_/srng_/trim_ keys don't match. */
           section[data-testid="stSidebar"] [class*="st-key-row_"] [class*="st-key-r_"]
             { margin-left: -0.35rem; }
           /* the » (open detailed calibration) rail (Pavel's pick, round 3 variant A): a TALL
@@ -987,19 +1149,27 @@ def _layout_css(light):
             { position: relative; padding-right: 1.5rem; }
           section[data-testid="stSidebar"] [class*="st-key-row_"] [class*="st-key-i_"]
             { position: absolute; top: 0.15rem; right: -1.0rem; width: 1.35rem; margin: 0; }
+          /* resting look bumped (D-078 follow-up, Pavel ×2: "a bit more visible") — the » is
+             now the SINGLE gateway to parameter detail, so it must be discoverable at a
+             glance: full-opacity glyph + hairline background, still quiet next to the sliders;
+             the hover accent below is unchanged */
           section[data-testid="stSidebar"] [class*="st-key-row_"] [class*="st-key-i_"] button
             { height: 4.3rem !important; width: 100%; min-height: 0; padding: 0;
-              font-size: 1.15rem; opacity: 0.65; display: grid; place-items: center;
-              border: 1px solid rgba(128,128,128,0.30); border-radius: 8px; }
+              font-size: 1.15rem; opacity: 0.9; display: grid; place-items: center;
+              background: rgba(128,128,128,0.10);
+              border: 1px solid rgba(128,128,128,0.45); border-radius: 8px; }
           section[data-testid="stSidebar"] [class*="st-key-row_"] [class*="st-key-i_"]
             button:hover
             { background: rgba(var(--accent-rgb),0.12); border-color: var(--accent); }
-          /* implied-param caption ("⇒ g_c = …") binds to ITS OWN slider: tight above, roomy
-             below (the room comes from the row's bottom margin) — it read as belonging to the
-             NEXT parameter before (Pavel, round 2) */
+          /* the row's BOX must CONTAIN its caption(s). Streamlit's own caption class ships
+             margin-bottom: -1rem, so the row's border box ended a full rem above its caption's
+             last line: the highlight — background tint + outline, painted on the row box by
+             BOTH inject_cal_emphasis_css and the D-055 hover rule — was drawn straight through
+             the one-line captions and through the SECOND line of the two-line ones, and where
+             two captions stack they overlapped outright (Pavel, round 11). Zero it; the row's
+             padding-bottom + margin-bottom then own the whole rhythm below the caption. */
           section[data-testid="stSidebar"] [class*="st-key-row_"]
-            [data-testid="stElementContainer"]:has([data-testid="stCaptionContainer"])
-            { margin-top: -0.4rem; }
+            [data-testid="stCaptionContainer"] { margin-bottom: 0; }
           section[data-testid="stSidebar"] [class*="st-key-row_"] { margin-bottom: 0.35rem; }
           /* compact "Reset ↺" beside the Parameters title: quiet, right-pinned, button-sized to
              the glyphs (replaces the old full-width reset bar) */
@@ -1024,10 +1194,10 @@ def _layout_css(light):
              longer writes --chart-h (its measured-fill writer raced the mounted plots on resize
              and made charts overlap). The clamp is sized so the LARGEST tab — three stacked
              charts (Financial: profit + revenue + cost, in both point and MC modes) — fits the
-             panel: chrome ≈ panel top padding 4.5rem + tab strip (TWO rows at L6, where five
+             panel: chrome ≈ panel top padding 4.5rem + tab strip (TWO rows from L2, where five
              tabs wrap on a 330px panel) ~4.6rem + MC headline ~1.8rem + draw-count row ~1.2rem
              + inter-chart gaps ~2rem + bottom padding 2.4rem ≈ 16.5rem, divided by 3 — sized
-             to the WORST case (Financial tab in MC mode at L6), measured in-browser: with the
+             to the WORST case (Financial tab in MC mode, five tabs), measured in-browser: with the
              12.6rem point-mode-only estimate that tab still scrolled 68px. Depends only on the
              viewport HEIGHT (not the panel width), so dragging the panel divider never changes
              heights — no height race, no overlap. The MC component reads the same variable off
@@ -1044,12 +1214,18 @@ def _layout_css(light):
              WIDE is the untouched three-column layout. NARROW: the fixed charts column can't dock
              beside the middle, so it hides and the injected 'Graphs' tab overlays the SAME
              always-mounted column over the middle (single MC mount preserved — only CSS toggles). */
-          /* the injected Graphs tab: hidden in wide, a segmented-style pill in narrow/phone */
+          /* the injected Graphs toggle: hidden in wide; a standalone pill on the TOP STRIP in
+             narrow/phone (round 2 — the pane tabs it used to ride beside are gone, so it
+             carries its own styling instead of a copied segmented-button class) */
           #graphsTab { display: none !important; }
           html[data-app-mode="narrow"] #graphsTab,
           html[data-app-mode="phone"]  #graphsTab { display: inline-flex !important;
-            align-items: center; margin-left: 6px; cursor: pointer; }
-          html[data-graphs-open="1"] #graphsTab { color: var(--accent); }
+            align-items: center; margin-left: 6px; cursor: pointer;
+            padding: 0.25rem 0.7rem; border-radius: 8px; color: inherit;
+            background: transparent; border: 1px solid rgba(128,128,128,0.4);
+            font-size: 0.9rem; }
+          html[data-graphs-open="1"] #graphsTab { color: var(--accent);
+            border-color: var(--accent); }
           /* the overlay's close × (body-level), only while the charts overlay is showing */
           #graphsClose { display: none; position: fixed; top: 4.2rem; right: 0.6rem; z-index: 121;
             font-size: 1.7rem; line-height: 1; cursor: pointer; color: __TX__;
@@ -1202,6 +1378,49 @@ def inject_layout_css():
     except Exception:
         _light = False
     st.markdown(_layout_css(_light), unsafe_allow_html=True)
+
+
+# ---- D-078 expanded parameter row --------------------------------------------------------
+# ONE source of truth for what "expanded" means, shared by the two expansion paths: the
+# server injects it per-run for the click-opened accordion row (inject_row_expand_css), and
+# the D-055 hover shim injects it transiently (no rerun) for the rows of a hovered equations
+# subsection — the shim gets the same text with an `@ROW@` selector marker baked in via
+# `_frontend_js_html` (`@ROW@`, not a `__NAME__` token: those must not survive substitution).
+# `!important` beats the collapsed-by-default rules in the layout CSS regardless of where the
+# carrying <style> lands (server styles render in <body>, the shim's #eqhlStyle in <head>).
+# Layout by construction: slider → tick band (labels re-shown in the space they always keep)
+# → caption(s) a flex-gap below — nothing overlaps, no margin tricks.
+def _row_expand_css(prefix):
+    """The EXPANDED-state CSS for one parameter row, `prefix` = its full row selector."""
+    return (
+        # the caption clears the tick band with a little margin: the band overflows its slider
+        # container ~0.7rem downward, so the flex gap alone would let the two graze
+        f'{prefix} [data-testid="stElementContainer"]'
+        ':has([data-testid="stCaptionContainer"])'
+        '{display:block !important;margin-top:0.35rem;}'
+        # opacity too: Streamlit's own stylesheet keeps the tick bar at opacity 0 at rest and
+        # only fades it in on slider hover — an expanded row shows the min/max statically
+        f'{prefix} [data-testid="stSliderTickBar"],'
+        f'{prefix} [data-testid="stTickBar"]'
+        '{visibility:visible !important;opacity:1 !important;}'
+        # D-079: the interactive trim lane appears on expansion (both paths — the server-
+        # injected accordion rule AND the hover shim's transient @ROW@ rule share this body)
+        f'{prefix} [class*="st-key-trim_"]'
+        '{display:block !important;}'
+        f'{prefix}{{background:rgba(var(--accent-rgb),0.05);}}'
+    )
+
+
+def inject_row_expand_css(row_key):
+    """Expand the click-opened accordion row (D-078): re-injected every run while its plain
+    `_p_open` session key holds, so it survives the background-MC reruns (a JS-toggled class
+    on the row node would not — same reasoning as the D-055 hover styles)."""
+    st.markdown(
+        "<style>"
+        + _row_expand_css(f'section[data-testid="stSidebar"] .st-key-{row_key}')
+        + "</style>",
+        unsafe_allow_html=True,
+    )
 
 
 def inject_cal_emphasis_css(row_keys):

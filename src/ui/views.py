@@ -1,37 +1,30 @@
 """The D-043 main area. Layout left→right (after the native sidebar):
 
-    [docked calibration panel (when open)] | tabbed pane [Introduction | Equations]
-                                             (folds into a thin strip while the panel is open)
+    [docked calibration panel (when open)] | Equations pane (Introduction tab retired —
+                                             Pavel, round 2; folds into a thin strip while
+                                             the panel is open)
                                            | PINNED chart tiles — Finance FIRST, Model path
                                              second, then the level-gated extras.
 
 The chart tiles render the point trajectory or the Monte-Carlo fan per the top-bar mode; the
 Monte-Carlo accumulation runs on EVERY run (background precalc — the finance panel component
 stays mounted hidden in Point-forecast mode), so switching modes is instant.
-D-044: the release-delay and under-the-hood sections are unreachable while MAX_LEVEL = 6 but
-kept intact (reversible removal).
+D-081 ladder amendment (Pavel, 2026-07-27): the ladder is exactly THREE levels — the old
+release-delay / cost-mechanism / extensions tail is RETIRED from the widget (not parked); the
+release-delay and under-the-hood sections were deleted here, their model content parked in
+the spec.
 """
-import re
-from dataclasses import fields
-
 import numpy as np
-import pandas as pd
 import streamlit as st
 
-import notebook_loader
-
 from . import calpanel, theme
-from .content import GRADES, NOTATION_SECTIONS
+from .content import LEVEL_INTRO, _sub_live
 from .equations import equations_panel
-from .levels import level_card
 from .mc import (ALGO_GRID, COMP_GRID_BOTH, COMP_GRID_L, VALUE_GRID, mc_accumulate,
                  mc_headline, mc_panel_fin, mc_panel_path, mc_prepare)
-from .model_access import NB, m
-from .simcache import delay_cached, sim_window_cached
 from .state import _reg, cal_open, close_cal, mc_active
-from .theme import (C_COST, C_FOLLOWER, C_GAP, C_LEADER, C_PROFIT, C_PSI, C_REV,
-                    C_SERVED, NEUTRAL, PAL, TAU_RAMP, WINDOW_COLS, fig_base, line,
-                    show, tab_intro)
+from .theme import (C_FOLLOWER, C_GAP, C_LEADER, C_PROFIT, C_PSI, C_SERVED, NEUTRAL, PAL,
+                    cal, fig_base, line, show)
 
 
 # ======================================================================= diagnostics
@@ -39,14 +32,14 @@ def _warnings(sim, LEVEL):
     """Blow-up / consistency-cap diagnostics (top of the charts column)."""
     cap_ok = bool(sim["cap_xF_le_xR"].all() and sim["cap_W"].all())
     warns = []
-    if LEVEL >= 3:   # γ (and thus the ψ blow-up) can only be non-trivial with the growth engine
+    if LEVEL >= 2:   # γ (and thus the ψ blow-up) can only be non-trivial with the growth engine
         xL_max = float(np.nanmax(sim["x_L"]))
         if xL_max > 25.0:
             blow_t = float(sim["t"][np.argmax(sim["x_L"] > 25.0)])
             warns.append(f"BLOW-UP: the leader path passes +25 OOM at t = {blow_t:.1f} yr — the "
                          f"$\\psi$ feedback has gone super-exponential (finite-time singularity, "
                          f"spec N4). Curves beyond that point are meaningless; lower "
-                         f"$\\gamma$/$\\rho_0$ or freeze AI assistance.")
+                         f"$\\gamma$/$\\beta_0$ or freeze AI assistance.")
     if not cap_ok:
         warns.append("Consistency cap hit (spec N2): somewhere the follower's capability $x^F$ "
                      "exceeds the model the leader serves, or the served model is worth less than "
@@ -61,34 +54,28 @@ def _warnings(sim, LEVEL):
 # the level-gated under-the-hood section)
 
 
-# ======================================================================= tabbed left pane
-def _tabbed_pane(d, p, LEVEL):
-    """Full-height left pane (D-043 amendment): [Introduction | Equations] tabs — no vertical
-    stacking that pushes the equations below the fold; the charts stay pinned on the right."""
+# ======================================================================= the equations pane
+def _equations_pane(d, p, LEVEL, sim):
+    """Full-height left pane — EQUATIONS-ONLY (Pavel, round 2: the Introduction/Equations
+    switch is gone; "each level can have short introduction just not to complicate it — it
+    should be minimal"). A short per-level intro paragraph (content.LEVEL_INTRO, distilled
+    from the retired level cards) sits above the equations. The notation expander that used to
+    sit at the pane's bottom is RETIRED (D-096) — everything crucial in it was already said
+    where the claim is made. The startup tour deck is a separate feature and untouched.
+    `sim` rides through to the equations panel for the D-081 speed-race subsection."""
     with st.container(key="mainpane"):
-        # the widget key is GC'd while the pane is folded behind the calibration panel, so the
-        # active tab is mirrored in a plain shadow key and reseeded from it on reopen (QA N2)
-        _reg("pane_tab", st.session_state.get("_pane_tab_mem", "Introduction"))
-        tab = st.segmented_control("Pane", ["Introduction", "Equations"], key="pane_tab",
-                                   label_visibility="collapsed") or "Introduction"
-        st.session_state["_pane_tab_mem"] = tab
-        if tab == "Introduction":
-            st.caption("A **leader** (the frontier lab(s)) races ahead while a **follower** "
-                       "(open-source / competitive fringe) catches up. **This explorer is "
-                       "layered:** raise the level (top bar) to add one mechanism at a time.")
-            level_card(LEVEL, d)
-            with st.expander("Notation & conventions — grows with the level", expanded=False):
-                st.markdown("\n\n".join(NOTATION_SECTIONS[L] for L in range(1, LEVEL + 1)))
-        else:
-            equations_panel(LEVEL, d, p)
+        st.caption(_sub_live(LEVEL_INTRO[LEVEL], d))
+        equations_panel(LEVEL, d, p, sim)
+        # (the "Notation & conventions" expander is RETIRED — D-096; see the note where
+        # NOTATION_SECTIONS used to live in ui/content.py for the audit and the two relocations)
 
 
 def _pane_strip():
-    """The thin vertical strip the tabbed pane folds into while the calibration panel is open
-    (variant A2); clicking it closes the panel and reopens the pane."""
+    """The thin vertical strip the equations pane folds into while the calibration panel is
+    open (variant A2); clicking it closes the panel and reopens the pane."""
     with st.container(key="eqstrip"):
-        st.button("Introduction · Equations ▸", key="strip_btn", on_click=close_cal,
-                  help="close the calibration panel and reopen this pane")
+        st.button("Equations ▸", key="strip_btn", on_click=close_cal,
+                  help="close the calibration panel and reopen the equations pane")
 
 
 # ======================================================================= chart tiles
@@ -101,21 +88,37 @@ def _finance_tile(d, sim, hl, LEVEL, mode_mc, mc_key):
         # each chart title is self-explanatory instead. D-056: border=False — the fixed panel
         # already frames the graphs; the bordered card was a redundant box (and inset padding).
         if mode_mc:
-            mc_headline(mc_key, show_blowup=(LEVEL >= 3))
-            need_rerun = mc_panel_fin(mc_key, visible=True, show_blowup=(LEVEL >= 3))
+            mc_headline(mc_key, show_blowup=(LEVEL >= 2))
+            need_rerun = mc_panel_fin(mc_key, visible=True, show_blowup=(LEVEL >= 2))
         else:
-            f = fig_base("Leader profit — revenue minus cost  Π  ($B/yr)", "year",
-                         "$/yr  ($B)", height=230)
-            line(f, sim["t"], sim["profit"], "profit  Π", C_PROFIT)
-            # no plotted break-even line — the axis zeroline marks 0; keep 0 inside the y-range
-            if float(np.min(sim["profit"])) >= 0.0 or float(np.max(sim["profit"])) <= 0.0:
-                f.update_yaxes(rangemode="tozero")
-            show(f, key="pt_profit")
-            f = fig_base("Revenue (gap rent) vs compute cost  ($B/yr)", "year", "$/yr  ($B)",
+            # D-080 (Pavel): ONE financial graph — the coverage ratio ρ_t = E_t/B_t in
+            # percent, "to bring attention to this most important output". The nominal
+            # profit / revenue-vs-cost charts are gone (a nominal view returns later behind
+            # an R₀-and-m toggle — future work). Break-even = the dashed 100% line; the
+            # first crossing gets a year annotation.
+            with np.errstate(divide="ignore", invalid="ignore"):
+                cov = 100.0 * np.asarray(sim["revenue"], float) / np.asarray(sim["cost"], float)
+            f = fig_base("Coverage — earnings ÷ model-building cost  (%)", "year", "%",
                          height=230)
-            line(f, sim["t"], sim["revenue"], "revenue  (gap rent θ·ΔW)", C_REV)
-            line(f, sim["t"], sim["cost"], "cost", C_COST, dash="dash")
-            show(f, key="pt_revcost")
+            line(f, cal(sim["t"]), cov, "coverage  ρ = E/B", C_PROFIT)
+            f.add_hline(y=100.0, line=dict(color=PAL["red"], dash="dash", width=1),
+                        annotation_text="break-even (100%)", annotation_position="bottom left",
+                        annotation_font_size=10)
+            fin = np.isfinite(cov)
+            if fin.any():
+                lo_v, hi_v = float(np.min(cov[fin])), float(np.max(cov[fin]))
+                f.update_yaxes(range=[min(lo_v, 90.0) - 0.04 * (hi_v - lo_v + 1),
+                                      max(hi_v, 110.0) + 0.04 * (hi_v - lo_v + 1)])
+            side = cov >= 100.0
+            if side.any() and (~side).any():          # the path crosses break-even
+                i = int(np.argmax(side != side[0]))   # first flip from the initial side
+                t0, t1 = float(sim["t"][i - 1]), float(sim["t"][i])
+                c0, c1 = float(cov[i - 1]), float(cov[i])
+                tc = t0 + (100.0 - c0) * (t1 - t0) / (c1 - c0) if c1 != c0 else t1
+                f.add_vline(x=float(cal(tc)), line=dict(color=NEUTRAL, dash="dot", width=1),
+                            annotation_text=f"crosses 100% in {theme.YEAR0 + tc:.1f}",
+                            annotation_position="top right", annotation_font_size=10)
+            show(f, key="pt_coverage")
     return need_rerun
 
 
@@ -124,7 +127,7 @@ def _capability_tile(d, sim, LEVEL, mode_mc, mc_key):
     rides with the gap). Point paths, or the capability-gap fan in Monte-Carlo mode.
     D-068: the algo-progress and compute graphs moved out to their own level-gated tabs."""
     served = d["tau"] > 0.0                 # x^R differs from x^L only under a release delay
-    show_growth = LEVEL >= 3
+    show_growth = LEVEL >= 2
     with st.container(border=False):
         # D-054 (round 2): no section header (the tab switch names it) and no how-to-read —
         # each chart title is self-explanatory instead. D-056: border=False (see _finance_tile).
@@ -137,12 +140,18 @@ def _capability_tile(d, sim, LEVEL, mode_mc, mc_key):
         cap_ttl = ("Capability over time — developed, served & follower  x" if served
                    else "Capability over time — leader vs follower  x")
         f = fig_base(cap_ttl, "year", "OOM above 2026 frontier", height=230)
-        line(f, sim["t"], sim["x_L"], "leader" + (" developed" if served else "") + "  xᴸ",
+        # D-096: the unit convention is stated HERE, beside the axis that carries it, because
+        # the retired notation expander was the only place that defined OOM or said where its
+        # zero is — and it was cumulative, so this has to render at every level, not just L1.
+        line(f, cal(sim["t"]), sim["x_L"], "leader" + (" developed" if served else "") + "  xᴸ",
              C_LEADER)
         if served:
-            line(f, sim["t"], sim["x_R"], "leader served  xᴿ", C_SERVED, dash="dash")
-        line(f, sim["t"], sim["x_F"], "follower  xᶠ", C_FOLLOWER)
+            line(f, cal(sim["t"]), sim["x_R"], "leader served  xᴿ", C_SERVED, dash="dash")
+        line(f, cal(sim["t"]), sim["x_F"], "follower  xᶠ", C_FOLLOWER)
         show(f, key="pt_cap")
+        st.caption("**OOM** = orders of magnitude — factors of 10 — of *effective* compute, "
+                   "physical compute times everything else (architecture, data, post-training "
+                   "know-how). Measured **above the early-2026 frontier**, so 0 is today.")
 
         gap_ttl = ("Capability gap  Δ  &  RSI-feedback share  ψ" if show_growth
                    else "Capability gap — how far ahead the leader is  Δ = xᴸ − xᶠ")
@@ -151,9 +160,9 @@ def _capability_tile(d, sim, LEVEL, mode_mc, mc_key):
         # anchor at 0 so a (near-)constant gap reads flat instead of auto-zooming into
         # integrator-precision noise on the y-axis
         f.update_yaxes(rangemode="tozero")
-        line(f, sim["t"], sim["Delta"], "gap  Δ = xᴸ − xᶠ  (OOM)", C_GAP)
+        line(f, cal(sim["t"]), sim["Delta"], "gap  Δ = xᴸ − xᶠ  (OOM)", C_GAP)
         if show_growth:
-            line(f, sim["t"], sim["psi_share"], "ψ-share (fraction of algo progress from RSI)",
+            line(f, cal(sim["t"]), sim["psi_share"], "ψ-share (fraction of algo progress from RSI)",
                  C_PSI, dash="dot")
             f.add_hline(y=0.25, line=dict(color=NEUTRAL, dash="dash", width=1),
                         annotation_text="ψ-share 25% (feedback no longer small)",
@@ -162,7 +171,7 @@ def _capability_tile(d, sim, LEVEL, mode_mc, mc_key):
 
 
 def _algo_tile(sim, mode_mc=False, mc_key=None):
-    """Algorithmic-progress paths a(t) — its own tab from L3 (D-068: moved out of Capability,
+    """Algorithmic-progress paths a(t) — its own tab from L2 (D-068, renumbered by D-081: moved out of Capability,
     where it crowded the gap graph). Both actors, unchanged data: catch-up flows through the
     algorithmic channel, so the follower's a can overtake the leader's while its total x trails.
     Monte-Carlo mode shows the leader/follower a(t) fans (same snapshot, own grid)."""
@@ -170,10 +179,10 @@ def _algo_tile(sim, mode_mc=False, mc_key=None):
         if mode_mc:
             mc_panel_path(mc_key, grid=ALGO_GRID)
         else:
-            f = fig_base("Algorithmic progress — leader vs follower  a(t)", "year",
+            f = fig_base("Algorithmic progress — leader vs follower  a", "year",
                          "OOM above 2026 frontier", height=230)
-            line(f, sim["t"], sim["a_L"], "leader  aᴸ", C_LEADER)
-            line(f, sim["t"], sim["a_F"], "follower  aᶠ", C_FOLLOWER)
+            line(f, cal(sim["t"]), sim["a_L"], "leader  aᴸ", C_LEADER)
+            line(f, cal(sim["t"]), sim["a_F"], "follower  aᶠ", C_FOLLOWER)
             show(f, key="pt_algo")
         st.caption("Catch-up flows through the *algorithmic* channel, so the follower's $a$ can "
                    "overtake the leader's $a$ while its total capability $x$ still trails — the "
@@ -181,157 +190,57 @@ def _algo_tile(sim, mode_mc=False, mc_key=None):
 
 
 def _compute_tile(sim, LEVEL, mode_mc=False, mc_key=None):
-    """Compute paths c(t) — its own tab from L4 (D-068). The follower's compute is NOT modeled
-    before L6, so L4–L5 plots ONLY the leader's frontier compute; L6 (catch-up channels) adds
+    """Compute paths c(t) — its own tab from L2 (D-068, renumbered by D-081). The follower's
+    compute is NOT modeled before L3, so L2 plots ONLY the leader's frontier compute; L3
+    (catch-up channels) adds
     the follower's compute line alongside the leader's (Pavel's explicit instruction).
     Monte-Carlo mode shows the compute fan(s) — same level gating for the follower's."""
-    both = LEVEL >= 6
+    both = LEVEL >= 3
     with st.container(border=False):
         if mode_mc:
             mc_panel_path(mc_key, grid=COMP_GRID_BOTH if both else COMP_GRID_L)
         else:
-            ttl = ("Compute — leader vs follower  c(t)" if both
-                   else "Compute — leader (frontier)  c(t)")
+            ttl = ("Compute — leader vs follower  c" if both
+                   else "Compute — leader (frontier)  c")
             f = fig_base(ttl, "year", "OOM above 2026 frontier", height=230)
-            line(f, sim["t"], sim["c_L"], "leader  cᴸ", C_LEADER)
+            line(f, cal(sim["t"]), sim["c_L"], "leader  cᴸ", C_LEADER)
             if both:
-                line(f, sim["t"], sim["c_F"], "follower  cᶠ", C_FOLLOWER)
+                line(f, cal(sim["t"]), sim["c_F"], "follower  cᶠ", C_FOLLOWER)
             show(f, key="pt_comp")
         st.caption(
             "Compute is the capital-intensive engine behind capability. "
             + ("The follower's own compute enters the model at this level, plotted alongside "
                "the leader's frontier compute." if both
                else "The follower's own compute is not modeled until the catch-up-channels "
-                    "level (6); here only the leader's frontier compute is shown."))
+                    "level (3); here only the leader's frontier compute is shown."))
 
 
 def _value_tile(sim, mode_mc=False, mc_key=None):
-    """Value flows W over the horizon — its own tab from L5 (D-068). LOG y-axis: W(x) grows
+    """Value flows W over the horizon — its own tab from L2 (D-068, renumbered by D-081). LOG y-axis: W(x) grows
     ~exponentially with capability, so on a log scale the value levels read off as slopes.
-    x-axis is the horizon (year) — the quantity the model exposes cleanly (W_R, W_F are already
-    integrated per t), and it keeps the tab consistent with the other time-series tabs. The two
-    lines are the served-leader value W(xᴿ) and the follower value W(xᶠ), whose gap the leader
-    earns rent on."""
+    x-axis is the horizon (year). D-077: W is an INDEX (W(0) = 1), so the y-axis is "× today's
+    frontier value", not dollars — the dollar scale lives in the single coefficient κ. The two
+    lines are the leader's value W(xᴸ) and the fringe's W(xᶠ), whose gap the leader earns on."""
     with st.container(border=False):
         if mode_mc:
             mc_panel_path(mc_key, grid=VALUE_GRID)
         else:
-            f = fig_base("Value over time — leader served vs follower  W  ($B/yr, log)",
-                         "year", "$/yr  ($B, log scale)", height=230)
-            line(f, sim["t"], sim["W_R"], "leader served  W(xᴿ)", C_LEADER)
-            line(f, sim["t"], sim["W_F"], "follower  W(xᶠ)", C_FOLLOWER)
+            f = fig_base("Value index over time — leader vs fringe  W  (× today, log)",
+                         "year", "× today's frontier value  (log scale)", height=230)
+            line(f, cal(sim["t"]), sim["W_R"], "leader  W(xᴸ)", C_LEADER)
+            line(f, cal(sim["t"]), sim["W_F"], "follower  W(xᶠ)", C_FOLLOWER)
             f.update_yaxes(type="log")
             show(f, key="pt_value")
-        st.caption("Each actor's capability commands a dollar value $W(x)$ (\\$B/yr); the leader "
-                   "earns rent on the **gap** $W(x^R) - W(x^F)$ between the two lines. Log "
-                   "y-axis: near-exponential value growth reads as straight-line slopes.")
+        st.caption("Each actor's capability commands a value $W(x)$, indexed so that today's "
+                   "frontier is **1**; the leader earns on the **gap** $W(x^L_t) - W(x^F_t)$ "
+                   "between the two lines, scaled so that the gap at $t = 0$ earns exactly "
+                   "$\\rho$ — today's coverage. Log y-axis: near-exponential value growth reads "
+                   "as straight-line slopes.")
 
 
-def _delay_section(d, items, LEVEL):
-    """Release delay (Level 7 — UNREACHABLE while MAX_LEVEL = 6, kept for the D-044 revert).
-    Same graph options in both modes; computed at the spot values either way."""
-    with st.expander("Release delay — does withholding the frontier model pay?",
-                     expanded=False):
-        tab_intro(
-            "The leader can serve an older model than it has (a release delay $\\tau$). "
-            "Withholding forgoes revenue now but slows the follower's distillation. These "
-            "profit paths show the trade-off for a constant delay (left) and for a one-month "
-            "delay switched on only inside a window (right).",
-            "Curves are **undiscounted profit per year**, not a single NPV number. The default "
-            "**relative** view plots each delay's profit *minus* the no-delay run — the "
-            "informative quantity, since delays move profit by a few \\$B against a ~\\$1000B "
-            "absolute level (switch to **Absolute** for context). Below the zero line the "
-            "delay is costing money; a rise back above it (the spike at a window's end) is the "
-            "withheld model being released. Delay is capped at 3 months (the policy-relevant "
-            "range); the horizon follows the toggle at the top of the sidebar.")
-        if d["delta_rel"] == 0.0:
-            st.info("$\\delta_{rel} = 0$ → **distillation disabled**: the released-model "
-                    "channel is off, so delaying release has no effect on the follower and "
-                    "every curve below coincides. This happens when the follower's own engine "
-                    "already covers the leader's speed (no wedge left for the release channel) "
-                    "— lower the follower's own rates or the lag to make the trade-off bite.")
-
-        view = st.radio("View", ["Relative to no delay", "Absolute"], horizontal=True,
-                        key="delay_view",
-                        help="Delays change profit by only a few \\$B against a ~\\$1000B "
-                             "absolute level, so the absolute curves overlap. The relative "
-                             "view plots the difference from the no-delay run — the "
-                             "informative quantity.")
-        rel = view == "Relative to no delay"
-        ylab = "profit vs no-delay  ($B/yr)" if rel else "profit Π  ($B/yr)"
-        zero_txt = "no-delay baseline" if rel else "break-even"
-
-        taus = (0.0, 1 / 12, 2 / 12, 3 / 12)
-        dc = delay_cached(items, taus)
-        base0 = np.asarray(dc["paths"][0])        # the τ = 0 profit path — the no-delay baseline
-        # the two figures stack VERTICALLY (Pavel's hard rule: never place graphs side by side)
-        ttl = ("(a) Constant delay: profit vs no delay" if rel
-               else "(a) Constant delay: profit Π")
-        f = fig_base(ttl, "year", ylab)
-        for path, tau, col in zip(dc["paths"], taus, TAU_RAMP):
-            if rel and tau == 0.0:
-                continue   # identically zero in the relative view — the baseline shows it
-            label = ("τ = 0 (release now)" if tau == 0
-                     else f"τ = {int(round(tau * 12))} mo delay")
-            y = (np.asarray(path) - base0) if rel else path
-            line(f, dc["t"], y, label, col)
-        f.add_hline(y=0, line=dict(color=PAL["red"], dash="dash", width=1),
-                    annotation_text=zero_txt, annotation_position="bottom left",
-                    annotation_font_size=10)
-        show(f, key="pt_delay_a")
-        ttl = ("(b) One-month delay in a window: profit vs no delay" if rel
-               else "(b) One-month delay in a window: profit Π")
-        f = fig_base(ttl, "year", ylab)
-        if not rel:
-            line(f, dc["t"], base0, "no delay (baseline)", NEUTRAL, dash="dash")
-        for t0, col in zip((0.0, 2.0, 5.0), WINDOW_COLS):
-            sw = sim_window_cached(items, t0, 2.0, 1.0)
-            y = (np.asarray(sw["profit"]) - base0) if rel else sw["profit"]
-            line(f, sw["t"], y, f"delay in years {t0:.0f}–{t0 + 2:.0f}", col)
-            f.add_vrect(x0=t0, x1=min(t0 + 2, d["T"]), line_width=0, fillcolor=col,
-                        opacity=0.06)
-        f.add_hline(y=0, line=dict(color=PAL["red"], dash="dash", width=1),
-                    annotation_text=zero_txt, annotation_position="bottom left",
-                    annotation_font_size=10)
-        f.update_xaxes(range=[0, d["T"]])  # keep the window figure on the shared horizon
-        show(f, key="pt_delay_b")
-        st.caption("(a) A constant delay shifts the whole revenue schedule down, because "
-                   "revenue is earned on the *served* model $x^R$, not the developed model "
-                   "$x^L$. (b) The same one-month delay costs most when imposed **early** "
-                   "(capability is scarcest and the follower is closest); when each shaded "
-                   "window ends, the withheld capability is released and profit briefly spikes "
-                   "— the catch-up release.")
-
-
-def _hood_section(p, hl):
-    """Under the hood (Level 9 — UNREACHABLE while MAX_LEVEL = 6, kept for the D-044 revert):
-    the live loaded notebook sources. Not an expander — its content nests expanders."""
-    st.subheader("Under the hood")
-    st.caption("All model code is loaded live from `model_notebook.ipynb` (the single source "
-               "of truth). Sources of every exported cell, in order:")
-    with st.expander("Parameter table (grades from calibration_master)", expanded=False):
-        rows = []
-        for fld in fields(m.Params):
-            val = getattr(p, fld.name)
-            rows.append(dict(param=fld.name,
-                             current=f"{val:g}" if isinstance(val, float) else str(val),
-                             grade=GRADES.get(fld.name, "-")))
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, height=320,
-                     hide_index=True)
-    st.markdown(f"**Implied t=0 operating profit** $\\theta\\,\\Delta W$ = "
-                f"\\${hl['op_profit_t0']:,.0f}B/yr vs observed ~\\$40–60B/yr.")
-    for idx, src in notebook_loader.export_sources(NB):
-        names = []   # top-level def/class/CONSTANT names, so the label says what the cell holds
-        for ln in src.splitlines():
-            if ln.startswith(("def ", "class ")):
-                names.append(ln.split()[1].split("(")[0].rstrip(":"))
-            elif re.match(r"^[A-Z][A-Z0-9_]*\s*=", ln):
-                names.append(ln.split("=")[0].strip())
-        label = f"export cell (notebook position {idx})"
-        if names:
-            label += "  —  " + ", ".join(names)
-        with st.expander(label):
-            st.code(src, language="python")
+# (the release-delay and under-the-hood sections are GONE with the retired levels —
+# Pavel's D-081 ladder amendment; the release-delay machinery is x^R-parked in the
+# spec (N9) and the notebook keeps delay_comparison for a future revival)
 
 
 def _charts_column(d, items, sim, hl, p, LEVEL, mode_mc, mc_key, sample_keys):
@@ -342,19 +251,34 @@ def _charts_column(d, items, sim, hl, p, LEVEL, mode_mc, mc_key, sample_keys):
     switch (one tile group at a time — Pavel; charts inside a group still stack vertically),
     with warnings on top and the level-gated extras under Finance."""
     with st.container(key="chartscol"):
-        # ---- the tab switch (same segmented idiom as the middle pane's tabs); the shadow
-        # mem key is belt-and-braces for widget GC, mirroring the pane_tab pattern.
-        # D-068: five tabs, introduced progressively by level. Financial + Capability are always
-        # present; Algo progress from L3, Compute from L4, Value from L5 (Compute gains the
-        # follower line at L6). D-054 (round 2): the switch already names the visible tab, so
-        # there are no per-tab section headers.
+        # ---- the mode AND horizon switches live HERE now (Pavel, round 2: "it is more
+        # natural there — it relates to the graphs"; the horizon addendum likewise — both
+        # configure the graphs, not the model). Same "mode"/"w_hz" session keys as always,
+        # read at the top of the run; a late-instantiating widget binding an existing key is
+        # the standard pattern. On narrow/phone they ride the Graphs overlay with the rest of
+        # this column — you see them exactly when you look at graphs.
+        _reg("mode", "Point forecast")
+        # ratios + the compact-pill CSS (theme: chartscol stButtonGroup) keep BOTH switches on
+        # one row at the 330px default panel width
+        _mc_c, _hz_c = st.columns([2.05, 1.45], vertical_alignment="center")
+        _mc_c.segmented_control("Mode", ["Point forecast", "Monte Carlo"], key="mode",
+                                label_visibility="collapsed",
+                                help="**Point forecast** shows the single trajectory at the "
+                                     "spot values. **Monte Carlo** shows the forecast fan "
+                                     "across the sampling ranges — it keeps accumulating in "
+                                     "the background either way, so switching is instant.")
+        _hz_c.segmented_control("Horizon", ["5 yr", "10 yr"], key=_reg("w_hz", "10 yr"),
+                                label_visibility="collapsed",
+                                help="The time window every graph uses.")
+        # ---- the tab switch (same segmented idiom); the shadow mem key is belt-and-braces
+        # for widget GC. D-068 (renumbered by D-081): five tabs, introduced by level.
+        # Financial + Capability are always present; the merged Dynamics level L2 unlocks Algo
+        # progress, Compute AND Value together (its mechanisms touch all three); Compute gains
+        # the follower line at L3. D-054 (round 2): the switch already names the visible tab,
+        # so there are no per-tab section headers.
         tab_labels = ["Financial", "Capability"]
-        if LEVEL >= 3:
-            tab_labels.append("Algo progress")
-        if LEVEL >= 4:
-            tab_labels.append("Compute")
-        if LEVEL >= 5:
-            tab_labels.append("Value")
+        if LEVEL >= 2:
+            tab_labels += ["Algo progress", "Compute", "Value"]
         default_tab = st.session_state.get("_charts_tab_mem", "Financial")
         if default_tab not in tab_labels:
             default_tab = "Financial"
@@ -377,16 +301,12 @@ def _charts_column(d, items, sim, hl, p, LEVEL, mode_mc, mc_key, sample_keys):
         need_rerun = False
         if fin_vis:
             need_rerun = _finance_tile(d, sim, hl, LEVEL, mode_mc, mc_key)
-            if LEVEL >= 7:
-                _delay_section(d, items, LEVEL)   # profit trade-off → rides with Finance
-            if LEVEL >= 9:
-                _hood_section(p, hl)
         elif tab == "Capability":
             _capability_tile(d, sim, LEVEL, mode_mc, mc_key)
         elif tab == "Algo progress":
             _algo_tile(sim, mode_mc, mc_key)      # point paths or a(t) fans
         elif tab == "Compute":
-            _compute_tile(sim, LEVEL, mode_mc, mc_key)  # leader only < L6; +follower at L6
+            _compute_tile(sim, LEVEL, mode_mc, mc_key)  # leader only < L3; +follower at L3
         elif tab == "Value":
             _value_tile(sim, mode_mc, mc_key)     # W over the horizon, log y-axis
         if not (mode_mc and fin_vis):
@@ -395,7 +315,7 @@ def _charts_column(d, items, sim, hl, p, LEVEL, mode_mc, mc_key, sample_keys):
             # heartbeat keeps the background accumulation ticking — switching tab or mode
             # then shows a ready fan instantly.
             need_rerun = mc_panel_fin(mc_key, visible=False,
-                                      show_blowup=(LEVEL >= 3)) or need_rerun
+                                      show_blowup=(LEVEL >= 2)) or need_rerun
         if need_rerun:
             st.rerun()   # corner click: propagate the inspected draw to the sidebar ticks
 
@@ -403,14 +323,14 @@ def _charts_column(d, items, sim, hl, p, LEVEL, mode_mc, mc_key, sample_keys):
 # ======================================================================= main entry
 def render_main(d, items, sim, hl, p, LEVEL):
     """Everything below the frozen top bar (D-047 layout): [calibration panel + fold strip
-    (when open) | middle tabbed pane (flex)] | right chart panel (fixed, collapsible).
+    (when open) | middle Equations pane (flex)] | right chart panel (fixed, collapsible).
     Column ratios are cosmetic — the theme CSS pins the real widths."""
     mode_mc = mc_active()
     open_key = cal_open()
     # ---- background Monte-Carlo accumulation runs on EVERY run (D-043) ---------------------
     mc_key, sample_keys, merge_delta, tro, pro = mc_prepare(d, LEVEL)
-    mc_accumulate(items, mc_key, tuple(sample_keys), merge_delta, show_blowup=(LEVEL >= 3),
-                  show_horizon=(LEVEL >= 5), target_ranges=tro, param_ranges=pro)
+    mc_accumulate(items, mc_key, tuple(sample_keys), merge_delta, show_blowup=(LEVEL >= 2),
+                  show_horizon=(LEVEL >= 2), target_ranges=tro, param_ranges=pro)
     if open_key:
         theme.inject_cal_emphasis_css(calpanel.param_row_key(open_key))
         pcol, scol, ccol = st.columns([1.0, 0.12, 0.5], gap="small")
@@ -424,6 +344,6 @@ def render_main(d, items, sim, hl, p, LEVEL):
         # autoscroll here — and `hl` stays the headline dict the chart panel needs.
         lcol, ccol = st.columns([1.0, 0.5], gap="small")
         with lcol:
-            _tabbed_pane(d, p, LEVEL)
+            _equations_pane(d, p, LEVEL, sim)
     with ccol:
         _charts_column(d, items, sim, hl, p, LEVEL, mode_mc, mc_key, sample_keys)

@@ -1,12 +1,12 @@
 """Streamlit widget — frontier-AI-lab competition (draft v2), phase 2.
 
-This app contains ZERO model math. Every model function, dataclass, and constant is loaded at
-startup from `model_notebook.ipynb` via `notebook_loader.load_model` (the notebook is the single
-source of truth, D-025). The UI lives in the `ui/` package — see `ui/__init__.py` for the module
-map — and this file only orchestrates one run:
+This app contains ZERO model math. Every model function, dataclass, and constant is imported at
+startup from `model.py` (the single source of truth, D-025; a plain module since D-085). The UI
+lives in the `ui/` package — see `ui/__init__.py` for the module map — and this file only
+orchestrates one run:
 
     top bar (mode + level)  →  sidebar (effective dict d)  →  simulate  →  main area
-    (docked calibration panel? | Introduction/Equations pane | pinned chart tiles)
+    (docked calibration panel? | Equations pane | pinned chart tiles)
 
 Layout & interaction spec: D-043 (+ amendments) and D-044 in Notes/decision_log.md.
 
@@ -25,9 +25,9 @@ theme.inject_base_css()
 theme.inject_layout_css()
 theme.inject_frontend_js()  # D-049/D-050: level-selector shim + panel drag-collapse (every run)
 
+# (the D-042 MC-only slider-fill de-emphasis injector is gone — round 2 made the playhead a
+# uniform rail in BOTH modes, in the static layout CSS)
 LEVEL = state.level()
-if state.mc_active():
-    theme.inject_mc_slider_css()
 
 topbar.render_title()   # page heading, above the sticky top strip (D-051)
 topbar.render()
