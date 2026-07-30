@@ -17,7 +17,7 @@ now ONE inversion in the app, the one `test_24` guards.
 import numpy as np
 import streamlit as st
 
-from .content import INTERP, INTERP_T, SHORT_TIP, SHORT_TIP_T, TSPEC, _sub_live
+from .content import INTERP, INTERP_T, SHORT_TIP, SHORT_TIP_T, TSPEC, _sub_live, lag_note
 from .equations import param_subsection, sidebar_filter_keys
 from .levels import apply_level_pins, merged_delta
 from .mc import _inspected_params
@@ -679,8 +679,10 @@ def render(LEVEL):
         # X-04 (extensions-sync): the stationary construction holds the lag constant for ALL t
         # only under Level 1's steady growth; once the Dynamics bend the paths (L2+) it is
         # guaranteed AT t = 0 only — the caption must not overclaim (the forward drift is the
-        # two slowdowns diverging, not an inversion defect).
-        _lagnote = ("the lag stays constant" if LEVEL == 1 else "the lag is stationary today")
+        # two slowdowns diverging, not an inversion defect). `content.lag_note` is the ONE place
+        # that decides how strong the claim may be: this was the only site X-04 reached, and the
+        # merged-δ card and its » header kept asserting "stays constant" at L2 (audit A/3).
+        _lagnote = f"the lag {lag_note(LEVEL)}"
         if _lag_rng:
             _llo, _lhi = _active_span("t_lag_mo")
             _elo, _ehi = _invert({"t_lag_mo": float(_llo)}), _invert({"t_lag_mo": float(_lhi)})

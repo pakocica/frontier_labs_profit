@@ -17,11 +17,11 @@ import streamlit.components.v1 as components
 
 from .calibration import _bare_interval, _effective, _fmt3, _target_interval, merged_lag_months
 from .content import (GRADES, INTERP, TSPEC, _CAL_ALT, _CAL_TARGET, _DELTA_MERGED_DOC,
-                      fmt_dial_value,
+                      fmt_dial_value, lag_note,
                       _MATH_LABEL, _fmt_range, _sub_live)
 from .model_access import m, _PARAM_TO_TARGET
 from .state import (_active_rng, _active_span, _base_rng, _gc0_sym, _tbounds, _tbounds_of,
-                    _use_range, _use_source, cal_open, close_cal, mc_active)
+                    _use_range, _use_source, cal_open, close_cal, level, mc_active)
 
 
 def param_row_key(key):
@@ -332,18 +332,34 @@ def _source_cards(key, merged, tkey, pinned, mode_mc):
     # the app-side coverage dial (D-080) has no Params field, so its envelope lives in the
     # session overlay — _base_rng is the one lookup that spans both
     ekey = tkey if tkey else (key if _base_rng(key) is not None else None)
-    env = _tbounds_of(_base_rng(ekey)) if ekey else None
+    erng = _base_rng(ekey) if ekey else None
+    # A `choice` dimension has NO CONTINUUM, so it gets no rail (audit A finding 1). η is the
+    # instance: PARAM_RANGES['eta'] is ('choice', [1.0, 0.61, 0.0, -2.0]), and `_tbounds_of` was
+    # handed that LIST as an endpoint — one click on the η » raised TypeError and took the page
+    # down. The rail is suppressed rather than taught to bracket the choices, because its whole
+    # semantics is "place this source on the parameter's range": a five-option menu has no range
+    # to place anything on, and η's rows carry the option LABELS ("0.61", "-2 (complements)")
+    # rather than numbers, so even past the crash the rail would have drawn an empty track.
+    continuous = erng is not None and erng[0] != "choice"
+    env = _tbounds_of(erng) if continuous else None
+    rail_ok = env is not None and not pinned
     # the header names the affordances the rows ACTUALLY carry: a menu whose sources document no
-    # interval (the D-080 coverage rows are single derived ratios) has dots and no brackets
-    any_range = mode_mc and ekey is not None and any(
+    # interval (the D-080 coverage rows are single derived ratios) has dots and no brackets, and
+    # a menu with no rail at all (a choice dimension, or a parameter pinned at this level) has
+    # neither — it must not instruct the reader to click something that is not on screen
+    any_range = mode_mc and rail_ok and any(
         "ci" in rw and not rw.get("display_only") for rw in rows)
     dial = f"*{TSPEC[tkey][0].split(' (')[0]}* slider" if tkey else "dial"
-    st.markdown(f"**Sources** — each row places itself on the {'dial' if tkey else 'parameter'}'s "
-                f"range. Click the **dot** to set the {dial} to that source's value"
-                + (", or the **bracket** under it to set the Monte-Carlo sampling range to its "
-                   "interval." if any_range else ".")
-                + " This panel stays open.")
-    rail_ok = env is not None and not pinned
+    if rail_ok:
+        st.markdown(f"**Sources** — each row places itself on the "
+                    f"{'dial' if tkey else 'parameter'}'s "
+                    f"range. Click the **dot** to set the {dial} to that source's value"
+                    + (", or the **bracket** under it to set the Monte-Carlo sampling range to "
+                       "its interval." if any_range else ".")
+                    + " This panel stays open.")
+    else:
+        st.markdown("**Sources** — the documented readings for this parameter, shown for "
+                    "interpretation. This panel stays open.")
     if rail_ok:
         _sp, _cr = _adopted_by(rows, wkey, ekey)
         _cur = st.session_state.get(wkey)
@@ -449,7 +465,7 @@ def render(d, p):
                           help="close the calibration panel")
         tgt = _CAL_TARGET.get("delta_total" if merged else key)
         if merged:
-            tgt = f"the ~{merged_lag_months(p):.0f}-month fringe lag stays constant"
+            tgt = f"the ~{merged_lag_months(p):.0f}-month fringe lag {lag_note(level())}"
         if tgt:
             st.caption(f"→ {tgt}" + (f" — set by the *{TSPEC[tkey][0].split(' (')[0]}* slider"
                                      if tkey else ""))

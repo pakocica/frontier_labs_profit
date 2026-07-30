@@ -364,7 +364,16 @@ def _live_vals(d):
     gaf = d.get("g_a_F") or P0.g_a_F        # below L3 the engine is pinned to 0 → hypothetical
     gcf = d.get("g_CF0") or P0.g_CF0
     split = d.get("split") or P0.split      # same hypothetical fallback below L3
-    ddev, drel = m.channels_from_lag(Delta0 / speed, speed, gaf + gcf)
+    # The channel LENGTHS the model runs come from `stationary_catchup` — D-081's re-anchor rule,
+    # which re-solves them against the exact t = 0 transfer identity. `channels_from_lag` supplies
+    # only the DIRECTION inside it, and quoting it here made the merged-δ methodology assert
+    # δ_eff ≈ 0.36 where the model runs 0.28 (audit A finding 4): 27% high, and contradicting the
+    # ⟪WEDGE⟫ in the very same sentence, since δ_eff·Δ₀ must equal the wedge (0.2825 × 0.6152 =
+    # 0.1738 ✓, 0.3600 × 0.6152 = 0.2215 ✗). Read at Level 1-2 the sentence describes what
+    # Level 3 does, so the three hypothetical follower values above are substituted back in —
+    # below L3 the engine is pinned off and `d` carries zeros for them.
+    ddev, drel = m.stationary_catchup(
+        m.Params(**{**d, "g_a_F": gaf, "g_CF0": gcf, "split": split}), merged=False)
     return {
         "JUMP": f"{10.0 ** (gc * ell):.2f}", "ELL": f"{ell:.2f}",
         "GC_X": f"{10.0 ** gc:.1f}", "DELTA": f"{speed / Delta0:.2f}",
@@ -386,6 +395,23 @@ def _sub_live(txt, d):
         for k, v in _live_vals(d).items():
             txt = txt.replace("⟪" + k + "⟫", v)
     return txt
+
+
+def lag_note(level):
+    """How strongly the widget may claim the fringe lag holds — the ONE place that decides it.
+    The caller supplies the subject ("the lag", "the ~7-month fringe lag"); this ends the phrase.
+
+    X-04's ruling: the stationary construction holds the lag constant for ALL t only under Level
+    1's steady growth. From Level 2 the two slowdowns bend the paths and stationarity is
+    guaranteed at t = 0 ONLY — measured at the L2 defaults, Δ₀ = 0.6152 falls to Δ(10) = 0.2728,
+    so the gap closes 56% over the horizon and "stays constant" is simply false there.
+
+    Why a helper for six words (audit A finding 3): X-04 was implemented at the sidebar caption
+    where it was reported, and the merged-δ card and its » panel header went on asserting "stays
+    constant" at Level 2 — one screen away from the slider caption saying the opposite about the
+    same number. Three sites, one claim; the claim lives here now.
+    """
+    return "stays constant" if level == 1 else "is stationary today"
 
 # (_CAL_TARGET — the one-line "observable FACT it is calibrated to" caption per parameter — and
 # _CAL_ALT — alternative calibrations / documented tensions for the details popover — are now

@@ -1086,8 +1086,10 @@ def channels_from_lag(lag_yr, speed, own_speed):
     function supplies the channel DIRECTION only -- stationary_catchup keeps the calibrated
     delta_dev:delta_rel ratio and re-solves the LENGTH against the exact t = 0 transfer
     identity (which is where `split` enters), so the old TODO about ignoring `split` is
-    resolved there, not here. Remaining direct consumers use it for doc-level numbers only
-    (ui/content._live_vals). The merged levels (1-2) never call it."""
+    resolved there, not here. stationary_catchup is now its ONLY caller: the app used to read
+    the channel lengths off this function for the merged-delta methodology's doc numbers, and
+    quoted a delta_eff 27% away from the one the model runs (audit A finding 4). The merged
+    levels (1-2) never call it."""
     p0 = Params()
     Delta0 = lag_yr * speed
     wedge = max(speed - own_speed, 0.0)
@@ -1873,8 +1875,16 @@ CAL_SOURCES = {
         dict(source="Whitfill & Wu 2025 — complements (scale control)", value="-2 (complements)",
              unit="", grade="B", note="sign flips on the K_train control"),
     ],
-    "gamma": [dict(source="Tentative default (no observable yet)", value=0.2, unit="/OOM",
-                   grade="C", note="")],
+    # D-091 re-based gamma from nats to base 10 (0.2 -> 0.2/ln10) and swept every quoted literal
+    # it could find -- Params.gamma, PARAM_RANGES, the interp, the pane, the spec, N4 -- but not
+    # this table, a THIRD home for parameter numbers. The row kept the retired nats value, which
+    # sits past the right end of the base-10 envelope [0, 0.1737], so the mini rail drew it as an
+    # out-of-envelope chevron and gamma was left with no adoptable source at all (audit A
+    # finding 2, and what Pavel saw: no dot on the rail). `disp` keeps the card readable while
+    # the machine value stays exactly the shipped default.
+    "gamma": [dict(source="Tentative default (no observable yet)", value=Params().gamma,
+                   disp="0.0869 /OOM", unit="/OOM", grade="C",
+                   note="0.2/ln 10 — the same tentative default in decades per OOM (D-091)")],
     "beta0": [dict(source="Tentative default (no observable yet)", value=0.3, unit="", grade="C",
                   note="")],
     "t_mid": [dict(source="Scenario default — sweep it", value=2.3, unit="yr", grade="F",

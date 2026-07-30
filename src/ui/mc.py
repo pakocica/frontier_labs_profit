@@ -3,6 +3,7 @@ snapshots, and the bidirectional panel component (mc_component/index.html).
 """
 from pathlib import Path
 
+import dataclasses
 import numpy as np
 import streamlit as st
 import streamlit.components.v1 as components
@@ -12,13 +13,40 @@ from .theme import (C_FOLLOWER, C_GAP, C_GAP_MED, C_LEADER, C_PROFIT, C_SAMPLE, 
                     _rgba)
 
 # ======================================================================= Monte Carlo (live)
-MC_BATCH = 4           # draws added per heartbeat tick (the component ticks every ~1.2s)
+# INTERIM RESPONSIVENESS PATCH, 2026-07-29 (Pavel: "I need the app be functional while people
+# might try to use it"). The heartbeat design reruns the WHOLE app once per tick
+# (see mc_accumulate below), so the old 4-draws-per-tick × 100-draw cap meant **25 consecutive
+# full-app reruns, ~30 s of continuous refreshing, after every single parameter change** — the
+# behaviour Pavel reported as the app not responding. A change now costs FOUR reruns, and each
+# does ~96% less compute: 20 draws at 5.9 ms against 100 at 115 ms.
+#
+# This is deliberately a strict subset of the ratified strip-down (Notes/widget_rebuild_design.md
+# R1/R2): 20 draws is R1's fast tier and MC_DT is R2's coarse draw grid. What is NOT done here is
+# the actual removal of the heartbeat, and R1's 200-draw "detailed" tier — both belong to the
+# rebuild. Nothing in model.py, no Params default and no fixture is touched, so no ratified number
+# moves and the suite needs no re-freeze.
+MC_BATCH = 5           # ticks land at 5 / 10 / 15 / 20 — FOUR reruns per change, against 25 before
 MC_MIN_GAP = 0.9       # min seconds between draws (so button clicks don't trigger a fresh batch)
-MC_CAP = 100           # stop drawing at this many draws (kept small so the sample browser —
-                       # which appears only once accumulation is done — is reachable in seconds)
+MC_CAP = 20            # R1's fast tier. The 200-draw detailed tier arrives with the rebuild, as
+                       # an explicit click that never carries over across a parameter change.
+# WHY NOT ONE BATCH OF 20 (which is where R1 ends up)? Three tests assert that accumulation GROWS
+# across reruns — test_background_mc_in_point_mode needs three successive increases (n1 < n2 < n3),
+# test_charts_panel_always_mounted and test_charts_tab_switch_keeps_mc_ticking one each. Those
+# assertions are the only available proxy for "the background precalc is running", since AppTest
+# cannot drive the component's heartbeat. Filling the cap in one tick makes them false, and
+# rewriting a test to go green during an urgent patch is precisely the move that has cost this
+# project days. 5 keeps every assertion honest, fires both milestones (10, 20) exactly, and still
+# removes 21 of the 25 reruns. The one-batch design lands with the rebuild, where the tests get
+# rewritten deliberately to assert the new invariant instead of the retired one.
+# The draw grid ONLY (R2): the point path keeps dt = 0.005. Measured at the Level-3 config, a draw
+# costs 5.9 ms here against 115 ms on the fine grid, for a worst whole-series deviation of 2.9e-3
+# — and fan width is set by parameter spread, orders of magnitude larger. The fine grid stays on
+# the point path because Delta-dot(0) = 0 is exact only under constant growth: at L2/L3 it is
+# ~1e-7 and coarsening degrades it ~450x, which the ratified-invariant test would (rightly) catch.
+MC_DT = 0.2
 # Bands and headline stats refresh only when n crosses these counts (then freeze until the next
 # one) — so the charts sit still instead of blinking on every tick.
-MC_MILESTONES = (10, 20, 50, 100)
+MC_MILESTONES = (10, 20)
 
 
 def _mc_theme():
@@ -164,7 +192,7 @@ def _mc_refresh_snapshot(store, show_blowup, show_horizon=True):
 
 
 # The panel is ONE bidirectional custom component (widget/mc_component/index.html): the four
-# Plotly charts plus the minimal in-panel corner controls (D-042) — a faint "n = k out of 100"
+# Plotly charts plus the minimal in-panel corner controls (D-042) — a faint "n = k out of MC_CAP"
 # count while accumulating, replaced by the [◀][▶][⊙ sample] pills when done (arrows only while
 # the sample is shown; no per-draw caption). Clicks come back through the Streamlit component
 # protocol as {show, idx, epoch}, so the server knows the inspected draw and the sidebar range
@@ -269,7 +297,8 @@ _MC_HELP = (
     "implying a bill outside that band are rejected and redrawn; the count is reported beside "
     "the stat rather than silently dropped.\n\n"
     f"Bands and this stat refresh only at round draw "
-    f"counts (10, 20, 50, 100) and drawing stops at {MC_CAP}; once done, the **⊙ control** in "
+    f"counts ({', '.join(str(_n) for _n in MC_MILESTONES)}) and drawing stops at {MC_CAP}; "
+    f"once done, the **⊙ control** in "
     "the chart corner steps through inspected draws (dashed ticks on the sidebar range "
     "controls). Any value, range or mode change restarts the accumulation. Profit is an "
     "undiscounted yearly flow.")
@@ -361,7 +390,11 @@ def mc_accumulate(params_items, mc_key, sample_keys=None, merge_delta=False, sho
     now = time.time()
     if (not store["stopped"] and len(store["draws"]) < MC_CAP
             and now - store["last"] >= MC_MIN_GAP):
-        p = m.Params(**dict(params_items))
+        # R2: the coarse grid is applied HERE, at the draw call, not to Params.dt — because
+        # ui/levels.py:150 does d["dt"] = P0.dt, so moving the default would propagate into the
+        # level pins and shift the frozen fingerprints. mc_draw_batch takes T and dt from p_base,
+        # so replacing it on this one object confines the change to the draws.
+        p = dataclasses.replace(m.Params(**dict(params_items)), dt=MC_DT)
         store["draws"].extend(m.mc_draw_batch(p, MC_BATCH, seed=store["batches"],
                                               sample_keys=list(sample_keys) if sample_keys else None,
                                               merge_delta=merge_delta,

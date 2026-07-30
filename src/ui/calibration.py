@@ -6,7 +6,7 @@ calibration panel (ui/calpanel.py — D-043; the old st.dialog modal is gone). C
 import numpy as np
 import streamlit as st
 
-from .content import PCT_KEYS, TSPEC, _CAL_TARGET, _MATH_LABEL, fmt_dial_value
+from .content import PCT_KEYS, TSPEC, _CAL_TARGET, _MATH_LABEL, fmt_dial_value, lag_note
 from .model_access import m, P0, TDEF, _PARAM_TO_TARGET
 from .state import _active_rng, _gc0_sym, _gc_sym, _tbounds_of, level, open_cal
 from .levels import merged_delta
@@ -175,5 +175,5 @@ def _cal_delta_merged(col, d, p):
     _card_head(col, f"$\\delta$ **=** {dstar:.2f}",
                f"[{_fmt3(12.0 / lag_hi)}, {_fmt3(12.0 / lag_lo)}]"
                + (" *(edited)*" if _led else ""))
-    col.caption(f"→ the ~{merged_lag_months(p):.0f}-month fringe lag stays "
-                f"constant: $\\delta = ({_gc_sym()}+g_a)/\\Delta_0$ — the *Fringe lag* slider")
+    col.caption(f"→ the ~{merged_lag_months(p):.0f}-month fringe lag {lag_note(level())}: "
+                f"$\\delta = ({_gc_sym()}+g_a)/\\Delta_0$ — the *Fringe lag* slider")
