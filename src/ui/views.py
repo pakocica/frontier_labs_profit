@@ -115,8 +115,17 @@ def _finance_tile(d, sim, hl, LEVEL, mode_mc, mc_key):
                 t0, t1 = float(sim["t"][i - 1]), float(sim["t"][i])
                 c0, c1 = float(cov[i - 1]), float(cov[i])
                 tc = t0 + (100.0 - c0) * (t1 - t0) / (c1 - c0) if c1 != c0 else t1
+                # D-105: the label stays, and rounds to a WHOLE year. A crossing quoted to a
+                # tenth ("2031.4") reads as a forecast precise to the month, which nothing here
+                # supports — the year is already an interpolation between two grid nodes, and
+                # under FIN4 (D-104) the accounting basis alone moved this date by ~4 years.
+                # It renders only when the path actually crosses inside the horizon, and it is
+                # self-evidently a property of the dials the reader has set (Pavel: "if the
+                # crossing happens before T, state it, it is clear that it is for the chosen
+                # parameter values and model level"). D-077's "no crossing year until FIN4 is
+                # settled" is discharged: FIN4 is settled.
                 f.add_vline(x=float(cal(tc)), line=dict(color=NEUTRAL, dash="dot", width=1),
-                            annotation_text=f"crosses 100% in {theme.YEAR0 + tc:.1f}",
+                            annotation_text=f"crosses 100% in {theme.YEAR0 + tc:.0f}",
                             annotation_position="top right", annotation_font_size=10)
             show(f, key="pt_coverage")
     return need_rerun
