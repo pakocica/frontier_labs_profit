@@ -532,10 +532,20 @@ _D050_JS = r"""
     function end() { if (!drag) return;
       if (C) W = drag.w0;                /* strip reopens at the PRE-drag width, not the min */
       drag = null; R.removeAttribute(aD);
-      /* (D-100) TEND TO THE DEFAULT: released within SNAP_DEF of the window-quarter default, the
-         panel unpins instead of storing "almost default" — so it keeps following the window
-         afterwards. Deliberate widths outside the snap zone still pin exactly as before. The
-         pin/unpin decision must precede apply(), which reads hasW. */
+      /* (D-100) TEND TO THE DEFAULT: released within SNAP_DEF of the default, the panel unpins
+         instead of storing "almost default" — so it keeps following the window afterwards.
+         Deliberate widths outside the snap zone still pin exactly as before. The pin/unpin
+         decision must precede apply(), which reads hasW.
+
+         THE DEFAULT IS defW() = PANEL_W_REM x the current root font, and the font is
+         clamp(vw/FONT_CANVAS_REM, FONT_BASE_PX, FONT_MAX_PX) — so it is ~22% of the window
+         (23.571/107) until the font caps at 18px near vw = 1926, and a fixed ~424px beyond that.
+         Deliberately NOT a constant fraction. This comment said "the window-quarter default"
+         until 2026-07-29: that was round 1 of D-100, which was REVERTED — Pavel had forgotten
+         the font cap, and a true quarter-of-window keeps growing past it. The quarter form
+         survives only as a fair DESCRIPTION of the rem-derived default below the cap, which is
+         why it was easy to implement and still not equivalent. Full reconciliation in
+         Notes/decision_log.md D-100. */
       if (!C && Math.abs(W - defW()) <= SNAP_DEF) unpin(); else save();
       apply(); poke(); }
     on(div, 'pointerup', end); on(div, 'pointercancel', end);

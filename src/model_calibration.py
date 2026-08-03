@@ -1,0 +1,259 @@
+"""The observable <-> parameter maps, the catch-up re-anchor rule, and the base model.
+
+Targets-first parameterization (D-037): wherever a parameter has a clean observable, the
+*observable* is the primitive. `target_defaults` is the forward map Params -> observables and
+`invert_targets` the inverse at t = 0; `stationary_catchup` supplies the degree of freedom that
+keeps the gap stationary at t = 0 under every dial setting; `base_params` builds the calibrated
+Level-1 model and the import-time self-checks below prove the two money identities on the model's
+own forward path.
+
+The slider bounds and Monte-Carlo distributions these maps run over live in `model_params`
+(`TARGET_RANGES`, `PARAM_RANGES`), which is data and imports nothing.
+"""
+import numpy as np
+from dataclasses import replace
+
+from model_params import Params
+from model_dynamics import (
+    algo_growth_L, alpha_from_loss, follower_compute_growth, gc_today, loss_from_alpha,
+)
+from model_profit import gap_index, simulate
+
+
+# D-093: `gap_index` MOVED to the value block -- simulate calls it now, so it belongs beside W
+# rather than among the calibration helpers. Since D-110 that block is `model_profit`, which is
+# where this module imports it from.
+#
+# `money_anchors` and `with_money` are GONE. They existed to solve the two dollar constants
+# (kappa, B0) so that the forward path reproduced the reported $40B earned and $75B spent at
+# t = 0. Normalising both legs by their own t = 0 values makes that solve unnecessary rather
+# than cheaper: E_0 = rho and B_0 = 1 hold as identities, at every level and every dial, so
+# there is no anchor left to re-derive and no way for a Params to be "money-incoherent".
+# Every `with_money(p)` call site simply dropped the wrapper.
+
+# D-088: `plateau_from_today` is GONE. It solved identity 2 at this one call site (D-086); the
+# identity now lives inside gamma_shape, where every use gets it. Nothing outside model.py ever
+# called it -- ui/sidebar.py already seeds d["g_C0"] with today's dialled growth and lets
+# invert_targets finish the job -- so there is no shim. Its `tied` flag went with it: the dial
+# is today's growth whether or not the floor is tied to it, so the transition-off context needs
+# no special case at all.
+
+
+def xdot_L0(p):
+    """The leader's EXACT capability speed at t = 0, from the model's own rate functions:
+    compute_growth(0) = Gamma(0) is today's realised compute growth (p0_c% of the way into
+    the slowdown), and algo_growth_L(0, 0) is the engine's t = 0 state -- both input ratios
+    are exactly 1 there, so it returns g_a (D-086 P1-2). Hence xdot_L0 = Gamma(0) + g_a, and
+    the effective-growth dial means TODAY at every p0_c.
+
+    (Defined ahead of target_defaults, which calls it at import time through _TD0.)"""
+    return float(gc_today(p) + algo_growth_L(0.0, 0.0, p))
+
+def target_defaults(p=None):
+    """Forward map Params -> target values (exact; round-trips through invert_targets).
+
+    D-086 P1-2: the three t = 0 observables are read off the model's OWN t = 0 rates --
+    compute_growth(0, p) = Gamma(0) and xdot_L0(p) -- not off the pre-transition plateau
+    g_C0 + g_a. Before D-086 a p0_c of 25% made the dial reading "3.24x/yr today" deliver
+    2.60x/yr and "11.34x/yr today" deliver 8.11x/yr; now every dial means what it says at
+    every p0_c."""
+    p = p if p is not None else Params()
+    gc0_today = gc_today(p)
+    speed0 = xdot_L0(p)
+    return {
+        't_compute_x': float(10.0**gc0_today),
+        't_eff_x':     float(10.0**speed0),
+        't_lag_mo':    float(p.Delta0 / speed0 * 12.0),
+        't_price_x':   float(10.0**p.g_p),
+        't_value_x':   float(10.0**p.nu),
+        't_value_inf_x': float(10.0**p.nu_inf),
+        't_floor_x':   float(10.0**p.g_C_inf),
+        # D-098, in PERCENT (the p0_c convention: a percent dial states percent). Under
+        # Leontief this reports the 50% the model actually delivers, not the weight's image.
+        'loss_half_gC': float(100.0 * loss_from_alpha(p.alpha, p.eta, p.leontief)),
+    }
+
+_TD0 = target_defaults()
+
+
+def channels_from_lag(lag_yr, speed, own_speed):
+    """Wedge-split at the channels levels (L6+): rescale the jointly calibrated channel defaults
+    (delta_dev, delta_rel) = (0.20, 0.26) so the stated lag is stationary in the same sense at the
+    CURRENT speeds: rescale = (wedge/Delta0) / (wedge0/Delta0_0), with wedge = leader speed minus
+    the follower's own speed (both at t=0) and Delta0 = lag_yr*speed. rescale = 1 at the default
+    lag and speeds, so the notebook defaults are recovered exactly (D-037). (Named `kappa` until
+    D-093 -- an unrelated object that shared the retired dollar coefficient's letter.)
+
+    Extensions-sync round (2026-07-28, audit X-04): under Pavel's refined re-anchor rule this
+    function supplies the channel DIRECTION only -- stationary_catchup keeps the calibrated
+    delta_dev:delta_rel ratio and re-solves the LENGTH against the exact t = 0 transfer
+    identity (which is where `split` enters), so the old TODO about ignoring `split` is
+    resolved there, not here. stationary_catchup is now its ONLY caller: the app used to read
+    the channel lengths off this function for the merged-delta methodology's doc numbers, and
+    quoted a delta_eff 27% away from the one the model runs (audit A finding 4). The merged
+    levels (1-2) never call it."""
+    p0 = Params()
+    Delta0 = lag_yr * speed
+    wedge = max(speed - own_speed, 0.0)
+    wedge0 = (p0.g_C0 + p0.g_a) - (p0.g_a_F + p0.g_CF0)
+    rescale = (wedge / max(Delta0, 1e-9)) / (wedge0 / p0.Delta0)
+    return float(p0.delta_dev * rescale), float(p0.delta_rel * rescale)
+
+def stationary_catchup(p, merged=True):
+    """Pavel's refined re-anchor rule (D-081 addendum, 2026-07-27): EVERY dial configuration
+    must reproduce, at t = 0, (a) the observed gap Delta0 AND (b) gap stationarity,
+    Delta_dot(0) = 0 exactly. The degree of freedom that absorbs this is the follower's
+    catch-up intensity -- the generalisation of the base construction
+    delta = (g_c + g_a)/Delta0:
+
+        merged:   delta = xdot_L0(p) / Delta0            (routes through delta_rel, D-034)
+        channels: delta_dev*split*Delta0 + delta_rel*Delta0
+                      = xdot_L0(p) - g_a_F - g_cF(0)     (the follower's t = 0 transfer gap)
+
+    with the exact t = 0 rates on BOTH sides. The channel DIRECTION comes from
+    channels_from_lag's rescaled calibrated defaults; only its LENGTH is re-solved, so the
+    split redistributes within the derived total. Consequence: dials shape the trajectory
+    only FORWARD of t = 0. BOTH documented residuals here are now gone: D-090 killed S0's
+    movement with the cost-SHAPE dials (ell, t_mid, g_c_inf), which was pure parameterisation
+    artefact, and D-093 killed kappa's movement with x_mid -- not by pinning it but by deleting
+    it. There is no derived finance constant left to drift, because E_0 = rho and B_0 = 1 are
+    identities rather than solutions.
+    Negative-wedge corner (the follower's own t = 0 speed exceeds the leader's): stationarity
+    is unsatisfiable with non-negative coefficients; returns (0, 0), the documented clamp --
+    flagged, not hidden (D-081 addendum)."""
+    x0 = xdot_L0(p)
+    if merged:
+        return split_delta(x0 / p.Delta0)
+    own0 = float(p.g_a_F + follower_compute_growth(0.0, p))
+    wedge = x0 - own0
+    if wedge <= 0.0:
+        return 0.0, 0.0                       # unsatisfiable corner -- documented clamp
+    # DIRECTION only: channels_from_lag scales delta_dev and delta_rel by a COMMON factor, and
+    # the `s` below renormalises the pair, so this call's arguments cancel out of the result to
+    # floating-point rounding (measured worst deviation 2.7e-16; asserted in test_24). They are
+    # nevertheless stated at the exact t = 0 rates for the same reason as everything else in
+    # D-086 P1-2 -- the plateau readings g_C0 + g_a and g_a_F + g_CF0 are not the model's t = 0
+    # speeds once a position dial is off zero.
+    d0, r0 = channels_from_lag(p.Delta0 / x0, x0, own0)
+    denom = d0 * p.split * p.Delta0 + r0 * p.Delta0
+    if denom <= 0.0:
+        return 0.0, float(wedge / p.Delta0)   # degenerate direction: all through distillation
+    s = wedge / denom
+    return float(d0 * s), float(r0 * s)
+
+
+def invert_targets(targets, base, merged=True):
+    """Invert a dict of target values into a dict of model parameters (t=0 inversion, D-037 Q2).
+
+    `base` supplies every parameter no target pins (split, follower engine, x_mid, ...);
+    inversions see already-inverted values (cross-target coupling by design: the effective-compute
+    target needs the inverted g_C0 to take its residual; the lag inversion uses the resulting
+    speed). NO MONEY STEP (D-093): there are no derived dollar constants left to re-anchor, so
+    every Params is money-coherent by construction rather than by a closing fix-up.
+    merged=True (pure-catch-up levels 1-2, D-081): the lag pins Delta0; the merged delta
+    re-derives per configuration as xdot_L0/Delta0 (= 12/lag at the base pins), so the gap
+    is STATIC at t = 0 for any dial setting. merged=False (channels, level 3): Delta0 from
+    the lag; (delta_dev, delta_rel) from stationary_catchup (same exactness)."""
+    out = {}
+    if 't_floor_x' in targets:
+        out['g_C_inf'] = float(np.log10(targets['t_floor_x']))
+    if 't_compute_x' in targets:
+        # D-088: the dial IS the parameter. g_C0 means g_C(0) -- today's growth -- and Gamma
+        # derives the pre-slowdown plateau from it, so this inversion is the identity map.
+        # (Between D-086 and D-088 this line solved the plateau here, which made it depend on
+        # g_C_inf and p0_c and forced a `tied` special case and a load-bearing ORDERING against
+        # the floor target above. All three are gone: no ordering, no floor dependence, no
+        # special case, and today's growth cannot drift with any other dial by construction.)
+        out['g_C0'] = float(np.log10(targets['t_compute_x']))
+    if 't_eff_x' in targets:
+        # RESIDUAL definition (Pavel, 2026-07-26): g_a = g_eff - g_c, both read at t = 0.
+        # D-086 P1-2: the subtrahend is TODAY's realised compute growth Gamma(0), not the
+        # plateau -- which is exactly what makes g_a a residual of two OBSERVABLES again.
+        # Floored at 0: the model has no "algorithms get worse" regime, and the corner of
+        # the joint draw where a high compute draw meets a low effective-compute draw would
+        # otherwise produce one. The widget also clamps its slider (GE5).
+        gc = gc_today(replace(base, **out))
+        out['g_a'] = float(max(np.log10(targets['t_eff_x']) - gc, 0.0))
+    if 't_value_x' in targets:
+        out['nu'] = float(np.log10(targets['t_value_x']))
+    if 't_value_inf_x' in targets:
+        out['nu_inf'] = float(np.log10(targets['t_value_inf_x']))
+    if 't_price_x' in targets:
+        out['g_p'] = float(np.log10(targets['t_price_x']))
+    if 'loss_half_gC' in targets:
+        # D-098. ORDER-FREE, unlike every other inversion here: alpha enters no t = 0 rate
+        # (both CES channels are 1 at t = 0, so adot_L(0) = g_a at every alpha), so this branch
+        # neither reads nor feeds `ref`. It may sit anywhere in this function; it is placed
+        # last among the scalar inversions only for reading order. It DOES read the active eta,
+        # which is a free dial and never a target -- so `base` carries it.
+        out['alpha'] = alpha_from_loss(float(targets['loss_half_gC']) / 100.0,
+                                       base.eta, base.leontief)
+    ref = replace(base, **out)
+    if 't_lag_mo' in targets:
+        lag_mo = float(targets['t_lag_mo'])
+        lag_yr = lag_mo / 12.0
+        # D-086 P1-2: the lag converts at the leader's EXACT t = 0 speed xdot_L0 = Gamma(0)
+        # + g_a, so "7 months behind" means 7 months at every p0_c (it drifted to 8.1 months
+        # at the top of the envelope while the plateau speed was used).
+        speed = xdot_L0(ref)
+        # The catch-up intensity then re-derives from the same exact t = 0 rates, so the gap
+        # is also STATIC at 0 (Pavel's refined re-anchor rule, D-081 addendum -- at the base
+        # pins this reduces to delta = 12/lag exactly).
+        out['Delta0'] = lag_yr * speed
+        ref = replace(ref, Delta0=out['Delta0'])
+        out['delta_dev'], out['delta_rel'] = stationary_catchup(ref, merged=merged)
+        ref = replace(ref, delta_dev=out['delta_dev'], delta_rel=out['delta_rel'])
+    return out
+
+
+# merged catch-up delta (base-model levels 1-5). At these levels the follower has NO engine of its
+# own (g_a_F, follower compute pinned to 0), so ALL of its motion is catch-up: the single effective
+# rate delta must supply the leader's FULL speed. split_delta routes it entirely through delta_rel,
+# acting on the full gap, so xdot^F = delta*(x^L - x^F) exactly.
+_DELTA_DEV_DEFAULT = Params().delta_dev
+_DELTA_ALGO_SHARE = 0.3
+# merged-delta prior for Monte Carlo: the image of the ratified lag prior (lognormal, 90% CI
+# [4, 12] months) under delta = 12/lag -> median 1.71/yr, 90% CI [1.0, 3.0]/yr. Only used if a
+# caller samples delta directly; the widget samples the LAG and inverts.
+MERGED_DELTA_RANGE = ('lognormal', float(np.log(12.0 / np.sqrt(4.0 * 12.0))),
+                      float(np.log(12.0 / 4.0) / 3.29))
+
+def split_delta(delta_total):
+    """Base-model mapping: the merged catch-up rate delta acts entirely on the capability gap,
+    i.e. (delta_dev, delta_rel) = (0, delta), so catch-up = delta*(x^L - x^F) EXACTLY (the base
+    model the widget's Level 1 presents). Level 6 unpacks delta into the two channels; the
+    effective single rate then is delta_rel + algo_share*delta_dev (see D-034)."""
+    return 0.0, float(delta_total)
+
+
+# ---- base-model self-checks (D-076). These run at import, so an incoherent default can never
+# reach the widget. The BASE = the full model with the later mechanisms pinned exactly as
+# ui/levels.apply_level_pins does at Level 1.
+def base_params(**kw):
+    """The calibrated BASE model: constant compute growth, constant residual g_a, exponential
+    value, merged catch-up, no build lag, no R&D markup on top of the observed bill. This is the
+    Level-1 model the calibration round closed on 2026-07-26."""
+    # (D-088: g_C0 is no longer pinned here. It IS G_C_TODAY -- the dataclass default states
+    # today's growth directly, so the old explicit pin, which existed only to undo D-086's
+    # plateau-valued default, has nothing left to undo.)
+    pins = dict(A1=True, gamma=0.0, ell=0.0, phi_RD=0.0, x_mid=200.0, tau=0.0,
+                g_a_F=0.0, g_CF0=0.0, g_CF_inf=0.0, split=0.0)
+    pins.update(kw)          # explicit overrides win, so a caller may probe e.g. x_mid
+    p = Params(**pins)
+    p = replace(p, g_C_inf=p.g_C0)                      # constant compute growth
+    if 'nu_inf' not in kw:
+        p = replace(p, nu_inf=p.nu)                     # D-083: value-slope transition OFF
+    p = replace(p, delta_dev=0.0,
+                delta_rel=(p.g_C0 + p.g_a) / p.Delta0)  # merged delta = 12/lag_mo
+    return p                 # D-093: no with_money() tail -- there is no derived money constant
+
+_PB = base_params()
+assert np.isclose(_PB.g_C0 + _PB.g_a, 1.0546130545568877, rtol=1e-12)   # speed 11.34 x/yr
+assert np.isclose(_PB.Delta0, 0.6151909484915179, rtol=1e-12)           # 7.0-month lag
+assert np.isclose(gap_index(_PB), 0.3664606328362475, rtol=1e-12)       # the value gap, in index units
+# D-093: the two stale-literal guards on kappa and B0 are GONE WITH THE FIELDS. Nothing here
+# needs re-fitting when a default moves -- E_0 = rho and B_0 = 1 are identities, and the two
+# asserts below check them on the model's OWN forward path rather than on a stored constant.
+_SB = simulate(replace(_PB, T=1.0))
+assert np.isclose(_SB['revenue'][0], _PB.rho, rtol=1e-12)               # E_0 = rho, 33.5% coverage
+assert np.isclose(_SB['cost'][0], 1.0, rtol=1e-12)                      # B_0 = 1 (today's bill)

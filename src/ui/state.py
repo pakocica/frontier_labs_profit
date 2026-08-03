@@ -88,6 +88,43 @@ def toggle_param_row(row_id, sub_id):
         S["_eq_focus_bump"] = int(S.get("_eq_focus_bump", 0)) + 1
 
 
+# ---- D-111: per-variable advanced calibration ----------------------------------------------
+# Every dynamic S-curve family is dialled by FOUR numbers: two endpoints (the rate today and the
+# asymptote), a midpoint and a shape/position. Pavel's ruling: the sidebar shows only the
+# ENDPOINTS by default; the midpoint and the position hide behind an "advanced calibration"
+# button in that variable's own section, PER VARIABLE — opening the compute curve's advanced
+# dials leaves the value curve's closed. (The global Advanced MODE that an earlier design
+# proposed is shelved: nothing else hides, and there is no app-wide switch.)
+#
+# The state is a plain session key per family, absent = closed, so it survives the widget GC the
+# level filter causes and is not a widget itself (a button has no state to restore, which is why
+# reset-all leaves the view where the user put it — it restores VALUES, and none of these dials
+# changes value by being hidden: `_param` serves the sv_ shadow, exactly as the level filter does).
+ADVANCED_DIALS = {"leader_compute": ("t_mid", "p0_c"),      # g_c(t): midpoint + position
+                  "value": ("x_mid", "p0_w"),              # w'(x): midpoint + position
+                  "follower": ("t_mid_F", "p0_F")}         # g_c^F(t): midpoint + position
+# parameter key -> the family whose button reveals it
+ADVANCED_FAMILY = {k: fam for fam, keys in ADVANCED_DIALS.items() for k in keys}
+
+
+def adv_open(fam):
+    """Is this variable's advanced calibration revealed? (Collapsed by default.)"""
+    return bool(st.session_state.get(f"_adv_{fam}", False))
+
+
+def toggle_adv(fam):
+    """The 'advanced calibration' button callback — per variable, never app-wide."""
+    st.session_state[f"_adv_{fam}"] = not adv_open(fam)
+
+
+def adv_hidden(key):
+    """True when `key` is a midpoint/shape dial whose variable's advanced calibration is shut.
+    Layered ON TOP of the level filter, never instead of it: a dial the level has not introduced
+    stays hidden whatever this says, and the button reveals only what the level would show."""
+    fam = ADVANCED_FAMILY.get(key)
+    return fam is not None and not adv_open(fam)
+
+
 # ---- reset infrastructure -----------------------------------------------------------------
 # Widgets are KEYED (key=f"w_{param}") and seeded into session_state when first created, instead of
 # passing value= — the seed-if-absent pattern lets a callback write the widget's state on reset
@@ -123,11 +160,17 @@ def _reset_all():
 # so the envelope below cannot live in PARAM_RANGES, which is in parameter units. Everything
 # that would read a notebook range for this key reads this overlay instead.
 #
-# The envelope (and the tight default — it is already a union) spans BOTH documented bases: the
-# FIN4(b) run-rate restatement ρ ≈ 0.42 [0.33, 0.56] and the calendar-basis 0.533; the pending
-# FIN4 basis ruling re-centres this dial and is the only open finance calibration question.
-APP_RANGES = {"cov0": ("uniform", 33.0, 56.0)}
-APP_SIM_DEFAULT = {"cov0": ("uniform", 33.0, 56.0)}
+# The envelope, and the tight default, which is the same object. D-104 (FIN4 settled, Pavel
+# 2026-07-29) RECENTRED it [33, 56] → [26, 46] — recentred down ~9 pp and slightly narrower
+# (20 vs 23 pp), not widened. The old width was a UNION ACROSS BASES, and that concept is gone:
+# every leg of ρ₀ now has to estimate the flow at one anchor date (t = 0 ≈ mid-2026), which leaves
+# no basis to take a union over. The ends are the one-at-a-time span around the two admissible
+# constructions C and D: floor 26.2% = 15.05/57.5 (Google struck from both sides), ceiling 46.3%
+# (Meta struck, labs-favourable corner). The trust-the-spike corner (52–63%) is deliberately
+# EXCLUDED — costs-025/026 reject its premise, and it is the only route back above the retired
+# default. Notes/calibration/param_docs/12_FIN4_resolution.md §6.1.
+APP_RANGES = {"cov0": ("uniform", 26.0, 46.0)}
+APP_SIM_DEFAULT = {"cov0": ("uniform", 26.0, 46.0)}
 
 
 def _base_rng(key):
@@ -157,7 +200,7 @@ def _gc0_sym():
 
     HISTORY, because this function existed only to paper over the gap it names. Between D-084 and
     D-086 the field held the pre-slowdown PLATEAU while the dial stated today's rate, so from
-    Level 2 the two were different numbers (at p₀ᶜ = 25%, 0.637 vs 0.511 OOM/yr) and anything
+    Level 2 the two were different numbers (at q₀ᶜ = 25%, 0.637 vs 0.511 OOM/yr) and anything
     displaying g_C0 had to say `g_c^{pre}` there or contradict the caption beside it. D-088 moved
     the plateau identity inside Γ, so the field IS the observable again and the split is gone:
     the plateau is a derived intermediate that no dial and no card ever shows.
@@ -170,7 +213,18 @@ def _gc0_sym():
 def _tbounds_of(rng):
     """Natural-unit endpoints of a distribution: uniform/triangular bounds, lognormal ~90% CI.
     A scale_of band's natural units are the SHARE of its reference draw (audit X-10: the g_a_F
-    dial is that share, so its bounds live here too)."""
+    dial is that share, so its bounds live here too).
+
+    A `choice` dimension's endpoints are the SMALLEST and LARGEST option (Pavel: "I don't see a
+    problem with clicking on descrete point on a line. There won't be interval, MC uses spot value
+    for this parameter."). This branch is what reverses 650bdba: η is the only choice dimension,
+    its option list was handed to `float(rng[1])` as if it were a scalar bound, and one click on
+    η's » raised TypeError and took the page down. The rail is drawn DISCRETELY from these
+    endpoints — dots at the options, no bracket and no crop band — rather than suppressed, so the
+    two documented η readings are clickable again."""
+    if rng[0] == "choice":                    # ('choice', [values...])
+        vals = [float(v) for v in rng[1]]
+        return min(vals), max(vals)
     if rng[0] == "lognormal":
         med = float(np.exp(rng[1]))
         return med * float(np.exp(-1.645 * rng[2])), med * float(np.exp(1.645 * rng[2]))
@@ -184,6 +238,71 @@ def _tbounds_of(rng):
 def _tbounds(tkey):
     """Target-slider bounds: the DEFAULT vetted envelope (range narrowing never moves these)."""
     return _tbounds_of(m.TARGET_RANGES[tkey])
+
+
+# ---- R11: ONE bounds convention for every free dial ----------------------------------------
+# Pavel: "The sliders should be slightly wider than the envelop of the confidence intervals /
+# spot values." Before this the thirteen free dials ran on TWO conventions that had to be read
+# one at a time: five bounded exactly at the envelope (X-12/D-084 — a spot outside it snapped on
+# entering Monte-Carlo mode, and the far end was unreachable) and eight hand-set wider (D-079).
+#
+# THE RULE, as code rather than as thirteen literals, so a re-vetted envelope propagates and the
+# convention cannot rot into a table of numbers nobody can re-derive: pad each side by 10% of the
+# ENVELOPE WIDTH and round OUTWARD to the dial's own step. Rounding to the step is not a detail —
+# R11's own worked example put γ's top at 0.19, which is not on γ's 0.02 grid and so could never
+# have been selected. The floor below is the second correction the arithmetic needs: an ADDITIVE
+# pad on an envelope whose width dwarfs its floor lands below zero, and several of these dials
+# have a model DOMAIN, not just a calibration range.
+#
+# R11's principle, which is why nothing here is "just usability": *a dial should not offer a value
+# the calibration cannot defend.* So this SHRINKS eight dials — most visibly ℓ, which loses the
+# 3.0-yr tail Pavel struck ("3 years sound like too much, you should disregard calibration options
+# that are too questionable. This is too extreme") — and widens five by a little.
+#
+# NOT applied to the seven TARGET rows: their bounds are `_tbounds`, the envelope exactly, and are
+# shared with the trim lane whose commit clamps to that same envelope (`_commit_range_s`). Padding
+# them would put every target playhead outside its own crop clamp — the snap-back inconsistency
+# R11 exists to remove. R11 says the override range slider stays at the envelope with no padding;
+# it does not rule on the target playheads, so they are left alone.
+#
+# `floor` = the smallest value the MODEL admits, not a taste call:
+#   p0_c/p0_w/p0_F  slope_span raises outside (0, 50)% — 0 is an unstarted transition with
+#                   infinite slope — so the floor is the first grid point above 0;
+#   x_mid/t_mid/t_mid_F  the curve's slope is span/u_mid, so a zero midpoint divides by zero;
+#   gamma           0 is admissible and MEANINGFUL (it is the freeze switch), negative is not.
+# The rest have no reachable floor: their padded bound already lands inside the domain.
+_DIAL_SPEC = {
+    # key:        (step, floor)
+    "p0_c":       (1.0, 1.0),
+    "p0_w":       (1.0, 1.0),
+    "p0_F":       (1.0, 1.0),
+    "x_mid":      (0.5, 0.5),
+    "g_a_F":      (0.01, None),
+    "t_mid":      (0.1, 0.1),
+    "t_mid_F":    (0.1, 0.1),
+    "beta0":      (0.05, None),
+    "gamma":      (0.02, 0.0),
+    "ell":        (0.05, None),
+    "g_CF0":      (0.05, None),
+    "g_CF_inf":   (0.01, None),
+    "split":      (0.05, None),
+}
+
+
+def dial(key):
+    """(lo, hi, step) for a free dial under R11 — the padded envelope, rounded out to the step.
+
+    The ±1e-9 is fp hygiene, not slack: an endpoint that lands exactly on the grid must stay
+    there, and (0.5 − 0.04)/0.01 evaluating to 45.999999999 would otherwise cost a whole step.
+    Real non-grid values are orders of magnitude further from an integer than this."""
+    step, floor = _DIAL_SPEC[key]
+    e_lo, e_hi = _tbounds_of(_base_rng(key))
+    pad = 0.10 * (e_hi - e_lo)
+    lo = round(float(np.floor((e_lo - pad) / step + 1e-9) * step), 10)
+    hi = round(float(np.ceil((e_hi + pad) / step - 1e-9) * step), 10)
+    if floor is not None:
+        lo = max(lo, floor)
+    return lo, hi, step
 
 
 # ---- user-edited MC sampling ranges (D-040/41/42): a session override dict LAYERED over the

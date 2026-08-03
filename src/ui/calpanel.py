@@ -67,16 +67,18 @@ _GRADE_COLORS = {"A": "#38a169", "B": "#d69e2e", "C": "#a0aec0", "D": "#8b95a3",
                  "F": "#718096"}
 
 # Accounting-basis chips (D-080 follow-up / FIN4): outlined, so they read as a different KIND of
-# label from the filled grade chips. Calendar and run-rate figures are incommensurable and mixing
-# them inside one ratio is the defect FIN4 §3 found to dominate the money side.
+# label from the filled grade chips. Since D-104 the chip discloses the R1 DATING ROUTE rather than
+# offering a basis to prefer — and `mixed` is a diagnosis, not a category.
 _BASIS_COLORS = {"calendar": "#3182ce", "run-rate": "#805ad5", "mixed": "#c05621"}
 
 _BASIS_DISCLOSURE = (
-    "Each row divides a before-model-building profit by a model-building outlay and shows the "
-    "implied coverage; the outlined chip is the **accounting basis** of the two legs. "
-    "*Calendar*, *run-rate* and *mixed* readings are **not commensurable** — dividing a "
-    "calendar-year cost by an annualized run-rate profit is worth ≈1.4× on the ratio by itself, "
-    "more than the margin-definition question. (FIN4)")
+    "Each row divides today's earnings before model-building by today's model-building outlay; "
+    "the outlined chip discloses how each leg was **dated**. Both legs must estimate the flow at "
+    "**the same instant** (here t = 0 ≈ mid-2026): a *calendar*-year total already is that "
+    "mid-year flow, a *run-rate* is the flow at its own month, and ***mixed* means the row failed "
+    "that test** — it is not a coverage reading at any date, and restating it on one date is worth "
+    "≈1.4–1.5× on the ratio, far more than the margin-definition question. Which instant one "
+    "picks is worth only ±3.5% per half-year. (D-104, settling FIN4)")
 
 
 def _grade_chip(rw):
@@ -172,6 +174,13 @@ _RAIL_CSS = """
   white-space:nowrap;}
 .st-key-calpanel .mbrkd{position:absolute;top:25px;height:6px;
   border:1px dashed rgba(var(--accent-rgb),0.35);border-top:0;border-radius:0 0 2px 2px;}
+/* DISCRETE rail (η): the dial's option positions, drawn as faint stops with their values under
+   them, so the row's own dot is read against what the menu actually offers. No crop band and no
+   bracket — the dimension is never sampled, so neither object exists for it. */
+.st-key-calpanel .mopt{position:absolute;top:18px;transform:translateX(-50%);width:7px;
+  height:7px;border-radius:50%;background:rgba(var(--accent-rgb),0.28);}
+.st-key-calpanel .moptl{position:absolute;top:31px;transform:translateX(-50%);font-size:9px;
+  opacity:0.45;font-variant-numeric:tabular-nums;white-space:nowrap;}
 /* the two NATIVE buttons: the element container is positioned, the button is drawn */
 .st-key-calpanel [class*="st-key-sdot_"],.st-key-calpanel [class*="st-key-sbrk_"]
   {position:absolute;z-index:3;}
@@ -202,9 +211,15 @@ _RAIL_CSS = """
 """
 
 
-def _mini_rail(pkey, i, rw, env, ekey, wkey, lo, hi, mode_mc, css):
+def _mini_rail(pkey, i, rw, env, ekey, wkey, lo, hi, mode_mc, css, opts=None):
     """One source row's rail. Returns nothing; appends per-row CSS to `css` and renders the
     furniture plus up to two native buttons into the current container.
+
+    `opts` non-None makes the rail DISCRETE (Pavel, 2026-07-29, reversing 650bdba's suppression):
+    the dial takes only the listed values, so the furniture draws a stop at each of them with its
+    number underneath, the row's own value is a dot on top, and there is NEITHER an interval
+    bracket NOR a crop band — η is never sampled, so neither object exists for it. The envelope
+    end labels are dropped too, because the first and last stops already carry them.
 
     Row states, all four required by the brief:
       · point + interval  — dot and bracket, both adoptable (the bracket only in Monte-Carlo
@@ -227,12 +242,16 @@ def _mini_rail(pkey, i, rw, env, ekey, wkey, lo, hi, mode_mc, css):
     def frac(v):
         return (float(v) - e_lo) / span
 
+    discrete = opts is not None
     rid = f"{pkey}_{i}"
     val = rw["value"]
     numeric = isinstance(val, (int, float))
     dead = bool(rw.get("display_only") or rw.get("triple") is not None)
     fv = frac(val) if numeric else None
     point_ok = numeric and not dead and -1e-9 <= fv <= 1 + 1e-9
+    # what a click WRITES, which is not always what the row reports: a choice dial is a selectbox
+    # and takes its option label (`adopt`), while `value` is the number the rail places
+    adopt = rw.get("adopt", val)
 
     ci = rw.get("ci")
     ci_a = ci_b = None
@@ -240,15 +259,21 @@ def _mini_rail(pkey, i, rw, env, ekey, wkey, lo, hi, mode_mc, css):
     if ci is not None:
         ci_a, ci_b = frac(ci[0]), frac(ci[1])
         ci_inside = ci_a >= -1e-9 and ci_b <= 1 + 1e-9
-    ci_ok = ci is not None and ci_inside and not dead and mode_mc and ci_b > ci_a
+    ci_ok = (ci is not None and ci_inside and not dead and mode_mc and ci_b > ci_a
+             and not discrete)
 
-    clo, chi = _active_span(ekey)
-    h = ['<div class="mrail"><div class="mtrack"></div>',
-         f'<div class="mcrop" style="left:{_mx(_f01(frac(clo)))};'
-         f'width:{_mw(_f01(frac(chi)) - _f01(frac(clo)))}"></div>',
-         f'<span class="mends l">{_fmt3(e_lo)}</span>',
-         f'<span class="mends r">{_fmt3(e_hi)}</span>']
-    if ci is not None and ci_b > ci_a:
+    h = ['<div class="mrail"><div class="mtrack"></div>']
+    if discrete:
+        for v in opts:
+            h.append(f'<span class="mopt" style="left:{_mx(_f01(frac(v)))}"></span>'
+                     f'<span class="moptl" style="left:{_mx(_f01(frac(v)))}">{_fmt3(v)}</span>')
+    else:
+        clo, chi = _active_span(ekey)
+        h.append(f'<div class="mcrop" style="left:{_mx(_f01(frac(clo)))};'
+                 f'width:{_mw(_f01(frac(chi)) - _f01(frac(clo)))}"></div>')
+        h.append(f'<span class="mends l">{_fmt3(e_lo)}</span>')
+        h.append(f'<span class="mends r">{_fmt3(e_hi)}</span>')
+    if not discrete and ci is not None and ci_b > ci_a:
         a, b = _f01(ci_a), _f01(ci_b)
         if not ci_ok:                       # furniture bracket: shown, not offered
             h.append(f'<span class="mbrkd" style="left:{_mx(a)};width:{_mw(b - a)}"></span>')
@@ -270,15 +295,17 @@ def _mini_rail(pkey, i, rw, env, ekey, wkey, lo, hi, mode_mc, css):
     # ---- the click targets, positioned over the furniture -----------------------------------
     if point_ok:
         cur = st.session_state.get(wkey)
-        on = isinstance(cur, (int, float)) and abs(float(cur) - float(val)) < 1e-9
+        on = (cur == adopt if isinstance(adopt, str)
+              else isinstance(cur, (int, float)) and abs(float(cur) - float(val)) < 1e-9)
         css.append(f'.st-key-sdot_{rid}{{left:{_mx(_f01(fv))};}}')
         if on:
             css.append(f'.st-key-sdot_{rid} button::after{{background:#fff;'
                        f'box-shadow:0 0 0 4px var(--accent);}}')
         st.button(("✓ " if on else "") + _fmt3(val), key=f"sdot_{rid}",
-                  on_click=_use_source, args=(wkey, val, lo, hi),
+                  on_click=_use_source, args=(wkey, adopt, lo, hi),
                   help=f"Set the spot value to this source's {_fmt3(val)} {rw['unit']}"
-                       " — exactly, whether or not it falls inside the sampling range.")
+                       + (" — the dial's own option." if discrete else
+                          " — exactly, whether or not it falls inside the sampling range."))
     if ci_ok:
         on = np.allclose(_active_span(ekey), (float(ci[0]), float(ci[1])), rtol=0, atol=1e-9)
         css.append(f'.st-key-sbrk_{rid}{{left:{_mx(_f01(ci_a))};'
@@ -306,7 +333,13 @@ def _adopted_by(rows, wkey, ekey):
         if rw.get("display_only") or rw.get("triple") is not None:
             continue
         v = rw["value"]
-        if (spot_src is None and isinstance(v, (int, float))
+        # `adopt` is what the control HOLDS when this row is in force (a choice dial holds its
+        # option label, not the number the row reports), so the comparison is against that
+        adopt = rw.get("adopt", v)
+        if spot_src is None and isinstance(adopt, str):
+            if cur == adopt:
+                spot_src = rw["source"]
+        elif (spot_src is None and isinstance(v, (int, float))
                 and isinstance(cur, (int, float)) and abs(float(cur) - float(v)) < 1e-9):
             spot_src = rw["source"]
         ci = rw.get("ci")
@@ -333,27 +366,34 @@ def _source_cards(key, merged, tkey, pinned, mode_mc):
     # session overlay — _base_rng is the one lookup that spans both
     ekey = tkey if tkey else (key if _base_rng(key) is not None else None)
     erng = _base_rng(ekey) if ekey else None
-    # A `choice` dimension has NO CONTINUUM, so it gets no rail (audit A finding 1). η is the
-    # instance: PARAM_RANGES['eta'] is ('choice', [1.0, 0.61, 0.0, -2.0]), and `_tbounds_of` was
-    # handed that LIST as an endpoint — one click on the η » raised TypeError and took the page
-    # down. The rail is suppressed rather than taught to bracket the choices, because its whole
-    # semantics is "place this source on the parameter's range": a five-option menu has no range
-    # to place anything on, and η's rows carry the option LABELS ("0.61", "-2 (complements)")
-    # rather than numbers, so even past the crash the rail would have drawn an empty track.
-    continuous = erng is not None and erng[0] != "choice"
-    env = _tbounds_of(erng) if continuous else None
+    # A `choice` dimension gets a DISCRETE rail (Pavel, 2026-07-29, reversing 650bdba). History,
+    # because the reversal only makes sense against it: PARAM_RANGES['eta'] is
+    # ('choice', [1.0, 0.61, 0.0, -2.0]) and `_tbounds_of` was handed that LIST as an endpoint, so
+    # one click on the η » raised TypeError and took the page down. 650bdba closed the crash by
+    # suppressing the rail for choice dimensions, on the argument that a menu has no range to
+    # place a source on. Pavel overruled that — "I don't see a problem with clicking on descrete
+    # point on a line. There won't be interval, MC uses spot value for this parameter" — and he is
+    # right that the argument proves too much: the options ARE ordered points, so a source lands
+    # among them, which is exactly what a reader wants to see. `_tbounds_of` now has the choice
+    # branch (min..max option) and the rail draws the option stops instead of a crop band; η's two
+    # rows carry NUMBERS now, with `adopt` holding the selectbox label a click writes.
+    opts = sorted(float(v) for v in erng[1]) if erng is not None and erng[0] == "choice" else None
+    env = _tbounds_of(erng) if erng is not None else None
     rail_ok = env is not None and not pinned
+    discrete = opts is not None
     # the header names the affordances the rows ACTUALLY carry: a menu whose sources document no
-    # interval (the D-080 coverage rows are single derived ratios) has dots and no brackets, and
-    # a menu with no rail at all (a choice dimension, or a parameter pinned at this level) has
+    # interval (the D-080 coverage rows are single derived ratios) has dots and no brackets, a
+    # DISCRETE dial has dots and no brackets by construction (it is never sampled, so there is no
+    # crop to adopt), and a menu with no rail at all (a parameter pinned at this level) has
     # neither — it must not instruct the reader to click something that is not on screen
-    any_range = mode_mc and rail_ok and any(
+    any_range = mode_mc and rail_ok and not discrete and any(
         "ci" in rw and not rw.get("display_only") for rw in rows)
     dial = f"*{TSPEC[tkey][0].split(' (')[0]}* slider" if tkey else "dial"
     if rail_ok:
-        st.markdown(f"**Sources** — each row places itself on the "
-                    f"{'dial' if tkey else 'parameter'}'s "
-                    f"range. Click the **dot** to set the {dial} to that source's value"
+        st.markdown("**Sources** — each row places itself on the "
+                    + (f"{'dial' if tkey else 'parameter'}'s options"
+                       if discrete else f"{'dial' if tkey else 'parameter'}'s range")
+                    + f". Click the **dot** to set the {dial} to that source's value"
                     + (", or the **bracket** under it to set the Monte-Carlo sampling range to "
                        "its interval." if any_range else ".")
                     + " This panel stays open.")
@@ -363,9 +403,16 @@ def _source_cards(key, merged, tkey, pinned, mode_mc):
     if rail_ok:
         _sp, _cr = _adopted_by(rows, wkey, ekey)
         _cur = st.session_state.get(wkey)
-        bits = [f"spot **{_fmt3(_cur)}**" + (f" — *{_sp}*" if _sp else " — *not from a source*")
-                if isinstance(_cur, (int, float)) else "spot —"]
-        if mode_mc and ekey is not None:
+        # a choice dial HOLDS a string (its selectbox option), so the state line shows it as it
+        # stands rather than falling through to a bare "spot —"
+        _shown_cur = (_fmt3(_cur) if isinstance(_cur, (int, float))
+                      else _cur if isinstance(_cur, str) else None)
+        bits = [f"spot **{_shown_cur}**"
+                + (f" — *{_sp}*" if _sp else " — *not from a source*")
+                if _shown_cur is not None else "spot —"]
+        # a DISCRETE dial has no sampling range to report — it is pinned at its spot by
+        # construction, and printing a collapsed [1, 1] would read as a range the user could edit
+        if mode_mc and ekey is not None and not discrete:
             _lo2, _hi2 = _active_span(ekey)
             bits.append(f"range **[{_fmt3(_lo2)}, {_fmt3(_hi2)}]**"
                         + (f" — *{_cr}*" if _cr else " — *not from a source*"))
@@ -397,7 +444,8 @@ def _source_cards(key, merged, tkey, pinned, mode_mc):
             # spatially, which is the argument that won variant 3.
             if rail_ok:
                 with st.container(key=f"srail_{key}_{i}"):
-                    _mini_rail(key, i, rw, env, ekey, wkey, lo, hi, mode_mc, css)
+                    _mini_rail(key, i, rw, env, ekey, wkey, lo, hi, mode_mc, css,
+                               opts=opts)
             if rw.get("display_only"):
                 # a different object, a bound, or a retired reading: shown for context, never
                 # clickable, and excluded from the default sampling span (source_span skips it).
@@ -409,11 +457,13 @@ def _source_cards(key, merged, tkey, pinned, mode_mc):
             # (the `triple` branch went with the money menus, D-093: no row carries the field
             # any more, and a guard against an impossible case reads as if one might.)
             if pinned:
-                if key == "g_p":
-                    st.caption("— fixed at this level: a measured leg, not a dial. The rows "
-                               "above are for interpretation.")
-                else:
-                    st.caption("— pinned at this level; the spot value is fixed.")
+                # D-106 removed the ONE special case here — g_p's "fixed at this level: a
+                # measured leg, not a dial". It now has a Level-1 row and an un-pinned card, so
+                # that sentence would be false wherever it could still render. No card in
+                # `subsection_param_entries` is pinned today; the generic line is kept for the
+                # next one rather than deleted, because the pinned path is a property of the
+                # table, not of any particular parameter.
+                st.caption("— pinned at this level; the spot value is fixed.")
                 continue
             if rw.get("ci") is not None and not mode_mc:
                 st.caption("— its interval is drawn under the rail; switch to **Monte Carlo** "
@@ -480,6 +530,11 @@ def render(d, p):
                                    d))
 
         def _sim_desc(ek):
+            base = _base_rng(ek)
+            if base is not None and base[0] == "choice":
+                # a choice dimension has no range to widen: the MC pins it at the spot, which is
+                # Pavel's own ruling for eta ("MC uses spot value for this parameter")
+                return "the chosen option — a menu, so the draws pin it at the spot"
             arng, _ = _active_rng(ek)
             return (_fmt_range(arng) if arng is not None
                     else "point — not sampled by default (widen the range to sample it)")

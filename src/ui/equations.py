@@ -9,7 +9,7 @@ exactly ONE subsection" cannot survive a 4-way merge, so `_CHANGED_AT` is now TU
 Level 2 changes four subsections at once AND adds one (the speed race). The concise view renders
 them in STORY order (the two opposing forces — slowdown, then RSI acceleration — then their
 riders ℓ and x_mid, then the speed race), opened by a one-line orientation caption naming the changed blocks
-and stating that follower/revenue/profit carry over; the show-all view accent-marks all of them.
+and stating that follower/earnings/coverage carry over; the show-all view accent-marks all of them.
 Every other level still changes exactly one subsection.
 
 D-092 RETIRED THE `curve` SUBSECTION (Pavel: "I said that the sigmoid function should be hidden
@@ -343,16 +343,23 @@ def _speed_race(dd, sim, level):
 # note that it is closely related to profit"). The id moved with the subject — `profit` →
 # `coverage` — because it keys the D-078 param→subsection reverse map and the sidebar's
 # click-to-reveal, and an id that names the wrong object is exactly how those drift apart.
-_SUB_ORDER = ["leader_compute", "leader_algo", "follower", "value", "revenue", "cost",
+# D-113 (Pavel): COST BEFORE EARNINGS, everywhere the basic model is presented — deck, pane and
+# paper tell one story. The bill's B₀ = 1 must be on the table before E₀ = ρ·B₀ uses it, which is
+# the whole reason the order matters here rather than being a matter of taste. The subsection IDs
+# are unchanged (`revenue` still keys the D-078 param→subsection map, the sidebar's
+# click-to-reveal and every fixture): the ORDER is data in this list, and only the list moved.
+_SUB_ORDER = ["leader_compute", "leader_algo", "follower", "value", "cost", "revenue",
               "coverage", "race"]
 _SUB_LABEL = {"leader_compute": "Leader compute  ċᴸ",
               "leader_algo": "Leader algorithmic progress  ȧᴸ",
               "follower": "Follower", "value": "Value  W(x)",
               # "& release" retired with the mechanism (D-077 parked x^R in spec N9) — the
-              # block's own equation has read E_t = κ[W(x^L) − W(x^F)] since then, with no
-              # served-model line. (Renaming Revenue → Earnings outright is the equation
-              # review's separate S-item, parked for the presentation pass.)
-              "revenue": "Revenue", "cost": "Cost", "coverage": "Coverage",
+              # block's own equation carried no served-model line since then.
+              # D-113 rider (Pavel): the label is EARNINGS — deck, pane, paper and charts all
+              # name the object the same way. The id stays `revenue`, which is a code name the
+              # screen never shows. NOTE the label is the expander's widget identity, so this
+              # rename resets that one subsection's open/closed state once, on first run.
+              "revenue": "Earnings", "cost": "Cost", "coverage": "Coverage",
               "race": "Frontier speed race  ẋᴸ"}
 # level -> the subsections changed / new at that level, TUPLE-valued since D-081 (L1: nothing).
 # The merged Level 2 changes FOUR at once and ADDS one, listed in STORY order — the concise
@@ -430,7 +437,15 @@ def subsection_param_entries(sub_id, level):
         cards = []
         if level >= 2:
             cards.append(("ell", False))
-        cards.append(("g_p", True))        # measured hardware leg; bill growth is a read-out
+        # D-106: UN-PINNED. g_p is one of exactly four numbers in the base model's closed-form
+        # break-even condition ν(g_c+g_a) > g_c − g_p (D-105), and Epoch's grade-A interval
+        # [×1.27, ×1.54] straddles the ×1.482 threshold that reverses the verdict — so its rails
+        # must render and its two published intervals must be clickable. It keeps the sidebar row
+        # `t_price_x` from Level 1, which is what makes a rail dot land on a MOUNTED widget
+        # instead of writing session state nothing reads (the D-098/A5 defect). Pinned=False also
+        # leaves `sidebar_filter_keys` unchanged at L2/L3: `below.get('g_p') == pinned` there, so
+        # g_p is "new" at neither level and its row stays a Level-1 control.
+        cards.append(("g_p", False))       # measured hardware leg; bill growth is a read-out
         return cards
     if sub_id == "coverage":
         return [("cov0", False)]           # D-080: the ONE money dial rides with the outcome
@@ -525,8 +540,8 @@ def equations_panel(level, dd, p, sim=None):
                    "force 1), leader algorithmic progress (AI now speeds up its own R&D — "
                    "force 2), cost (the lead time $\\ell$ starts to bite once the compute curve "
                    "bends) and value (it *bends* at $x_{mid}$) — plus a new **frontier speed "
-                   "race** block at the end that reads off which force wins. Follower, revenue "
-                   "and profit carry over from Level 1 unchanged. Each rate that now *moves* "
+                   "race** block at the end that reads off which force wins. Follower, earnings "
+                   "and coverage carry over from Level 1 unchanged. Each rate that now *moves* "
                    "carries a small graph of its own path, beside its own equation.")
     # CONCISE by default (Pavel's ruling): only the subsection(s) changed at this level show;
     # one checkbox expands to the full model. At L1 EVERYTHING is new, so all subsections
@@ -560,17 +575,17 @@ def equations_panel(level, dd, p, sim=None):
                     # D-086 P1-2: the DIAL is today's growth g_c, and the curve's upper plateau
                     # is the DERIVED g_c^pre — the rate before the slowdown started. Stating it
                     # the other way round (dial = plateau) is what made three "today" anchors
-                    # drift by up to 28% across the p₀ᶜ envelope.
+                    # drift by up to 28% across the q₀ᶜ envelope.
                     eq("**Force 1 — compute growth slows down.** A rate that used to be "
                        "constant now *slides*: you dial **today's** rate $g_c$ — the same "
                        "$g_c$ as at Level 1 — the "
                        "long-run floor $g_{c\\infty}$ it heads for, the midtime $t_{mid}$, and "
-                       "how much of the slowdown $p^c_0$ is already behind us. Where it "
+                       "how much of the slowdown $q^c_0$ is already behind us. Where it "
                        "*started* ($g_c^{pre}$, above today's rate — we have come part of the "
                        "way down already) is derived, so saying the slowdown is further along "
                        "raises where it started, never what it is now.",
                        r"\dot c^L_t = g_{c,t} = \Gamma(t;\, g_c,\, g_{c\infty},\,"
-                       r" t_{mid},\, p^c_0)")
+                       r" t_{mid},\, q^c_0)")
                     _draw_transition(
                         dd["g_C0"], dd["g_C_inf"], dd["t_mid"], dd["p0_c"], "years",
                         f"Compute growth: ×{10.0 ** dd['g_C0']:.2f}/yr today, easing toward "
@@ -578,7 +593,7 @@ def equations_panel(level, dd, p, sim=None):
                         f"({YEAR0 + dd['t_mid']:.0f}).", years=True)
                     st.caption(":gray[That is what keeps $g_c$, effective growth "
                                "$\\dot x^L_0$ and the fringe lag equal to their dialled values "
-                               "at every $p^c_0$ and every floor.]")
+                               "at every $q^c_0$ and every floor.]")
             _cal_cards(right, subsection_param_entries("leader_compute", level), dd, p)
         elif sub_id == "leader_algo":
             with left:
@@ -627,9 +642,9 @@ def equations_panel(level, dd, p, sim=None):
                     eq("Follower compute growth — the same universal curve as the leader's "
                        "(introduced here), with the follower's own dials throughout: its "
                        "growth **today** $g_c^F$, its own floor, its own midtime and its own "
-                       "position $p^F_0$.",
+                       "position $q^F_0$.",
                        r"\dot c^F_t = g^F_{c,t} = \Gamma(t;\, g_c^F,\, g_{c\infty}^F,\,"
-                       r" t_{mid}^F,\, p^F_0)")
+                       r" t_{mid}^F,\, q^F_0)")
                     _draw_transition(
                         dd["g_CF0"], dd["g_CF_inf"], dd["t_mid_F"], dd["p0_F"], "years",
                         f"The fringe's own slowdown: ×{10.0 ** dd['g_CF0']:.2f}/yr today "
@@ -663,12 +678,12 @@ def equations_panel(level, dd, p, sim=None):
                        "$W(x) = 10^{\\,w(x)}$ — the same $W$ as at Level 1, one level of "
                        "structure deeper. What the Dynamics add is that its SLOPE eases: "
                        "from $\\nu$ **today** down to the floor $\\nu_\\infty$, half-done at "
-                       "$x_{mid}$, with $p^w_0$ of the easing already behind us. The anchor "
+                       "$x_{mid}$, with $q^w_0$ of the easing already behind us. The anchor "
                        "$W(0) = 1$, i.e. $w(0) = 0$, is exact. No hard ceiling: value keeps "
                        "growing at the floor slope, so each further OOM is worth at least "
                        "$10^{\\nu_\\infty}$×.",
                        r"W(x) = 10^{\,w(x)}, \qquad"
-                       r" w'(x) = \Gamma(x;\, \nu,\, \nu_\infty,\, x_{mid},\, p^w_0)")
+                       r" w'(x) = \Gamma(x;\, \nu,\, \nu_\infty,\, x_{mid},\, q^w_0)")
                     _draw_transition(
                         # NO calendar years here (D-092 follow-up): this transition runs over
                         # CAPABILITY, so a year label would be meaningless. Its own units stay,
@@ -680,7 +695,7 @@ def equations_panel(level, dd, p, sim=None):
                         f"how far the frontier has moved, not when.")
                     st.caption(":gray[D-088: $\\nu$ is literally today's slope, $w'(0)$ — "
                                "dial 2.1× per OOM and you get 2.1× at today's frontier, at "
-                               "every $p^w_0$. It used to be the slope *before* the easing, "
+                               "every $q^w_0$. It used to be the slope *before* the easing, "
                                "which made the dial read about 1% low.]")
             _cal_cards(right, subsection_param_entries("value", level), dd, p)
         elif sub_id == "revenue":
@@ -688,16 +703,24 @@ def equations_panel(level, dd, p, sim=None):
                 # (the release-delay x^R equation is retired from the widget with its level —
                 # x^R-parked in the spec, N9)
                 served = "x^L"   # D-077: the model runs on the DEVELOPED frontier
-                eq("Earnings ride the value gap between the leader's model and the follower, "
-                   "**divided by that same gap today**. The normalisation is what makes this "
-                   "block parameter-free: whatever the leader earns now is the unit, so the "
-                   "line says how earnings grow, and $\\rho$ below says where they start.",
-                   rf"E_t = \rho\;"
-                   rf"\frac{{W({served}_t) - W(x^F_t)}}{{W({served}_0) - W(x^F_0)}}")
+                # D-113 (Pavel): the PAIR replaces the explicit normalised ratio. It is exactly
+                # as strong — ∼ hides one fixed constant and the second line pins it — and it
+                # says the two things separately: how earnings GROW, and where they START. The
+                # bill block above has just established B₀ = 1, which is what makes E₀ = ρ a
+                # corollary rather than a second assumption.
+                eq("Earnings are the rent on the lead: they ride the **value gap** between the "
+                   "leader's model and the at-cost follower's. The $\\sim$ hides only a fixed "
+                   "yardstick — that same gap valued **today** — and the second line pins the "
+                   "level against the bill above. Since that bill is measured in multiples of "
+                   "itself, $B_0 = 1$, earnings start at $\\rho$ — today's coverage.",
+                   rf"\begin{{aligned}}"
+                   rf"E_t &\sim W({served}_t) - W(x^F_t) \\[6pt]"
+                   rf"E_0 &= \rho\,B_0"
+                   rf"\end{{aligned}}")
                 st.caption(":gray[Measured in multiples of today's model-building bill, not "
-                           "dollars (D-093). Only the ratio of earnings to cost was ever "
-                           "identified, so the widget no longer displays a scale that the "
-                           "result does not depend on.]")
+                           "dollars. Only the ratio of earnings to cost was ever identified, "
+                           "so the widget no longer displays a scale that the result does not "
+                           "depend on.]")
             right.caption("(no parameter — the level is normalised away; the one finance "
                           "dial, $\\rho$, lives in **Coverage** below)")
         elif sub_id == "cost":

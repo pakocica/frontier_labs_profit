@@ -10,6 +10,7 @@ the top of the run. `render_footer()` draws the quiet author attribution.
 import streamlit as st
 
 from .levels import LEVEL_LABELS
+from .state import close_cal
 
 # ---- one-line constant swaps (Pavel owns the wording) --------------------------------------
 TITLE_MAIN = "Will Frontier AI Labs Be Profitable?"
@@ -61,8 +62,10 @@ def render():
                 st.markdown("Model:", help=LEVEL_EXPLAINER)
         # the level selector writes st.session_state["level"]; the sidebar reads it (top of run).
         # `help` is the DESKTOP hover tooltip; the ⓘ popover (narrow/phone) carries the same text.
+        # Switching level closes the docked calibration panel: the panel shows a parameter that
+        # the new level may not even mount, and Pavel wants a level switch to read as a fresh view.
         c_sel.selectbox("Level", LEVEL_LABELS, key="level", label_visibility="collapsed",
-                        help=LEVEL_EXPLAINER)
+                        help=LEVEL_EXPLAINER, on_change=close_cal)
         with c_info:
             # hover doesn't exist on touch, so narrow/phone get a tappable ⓘ; hidden in wide by
             # theme CSS (.st-key-levelinfo), where the selectbox tooltip already covers it

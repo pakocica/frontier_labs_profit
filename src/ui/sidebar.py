@@ -22,11 +22,11 @@ from .equations import param_subsection, sidebar_filter_keys
 from .levels import apply_level_pins, merged_delta
 from .mc import _inspected_params
 from .model_access import m, P0, TDEF
-from .state import (APP_RANGES, _active_span, _commit_range_s,
+from .state import (ADVANCED_DIALS, APP_RANGES, _active_span, _commit_range_s,
                     _commit_sampled, _default_sampled, _default_span, _gc0_sym, _gc_sym,
                     _mc_dim_editable, _mc_sampled, _reg, _reset_all, _reset_full, _reset_one,
-                    _sampled_on, _spot_moved, _tbounds, _tbounds_of, cal_open, mc_active,
-                    toggle_cal, toggle_param_row)
+                    _sampled_on, _spot_moved, _tbounds, _tbounds_of, adv_hidden, adv_open,
+                    cal_open, dial, mc_active, toggle_adv, toggle_cal, toggle_param_row)
 from .theme import C_SAMPLE, inject_row_expand_css
 
 
@@ -47,8 +47,32 @@ def render(LEVEL):
     # toggle-on override below).
     allowed = sidebar_filter_keys(LEVEL)
 
-    def _vis(*keys):
+    def _lvl_vis(*keys):
+        """The LEVEL filter alone: would this level show the row at all? (D-065.)"""
         return allowed is None or any(k in allowed for k in keys)
+
+    def _vis(*keys):
+        """Does any of these rows render? The level filter AND — for the S-curve midpoint and
+        position dials — that variable's advanced-calibration button (D-111). Two independent
+        gates, both of which must pass for a given key: the button can only reveal a dial the
+        level has already introduced."""
+        return any(_lvl_vis(k) and not adv_hidden(k) for k in keys)
+
+    def _adv_button(container, fam, what):
+        """D-111: the per-variable 'advanced calibration' toggle, rendered inside that
+        variable's own section, directly above the dials it reveals. Suppressed entirely when
+        the level would not show those dials anyway — a button that reveals nothing is worse
+        than no button. `what` names the two dials in the reader's language, so the closed
+        state still says what is behind it."""
+        if not _lvl_vis(*ADVANCED_DIALS[fam]):
+            return
+        open_ = adv_open(fam)
+        container.button("advanced calibration ▾" if not open_ else "advanced calibration ▴",
+                         key=f"adv_{fam}", on_click=toggle_adv, args=(fam,),
+                         help=("Hide" if open_ else "Show") + f" this curve's {what}. The two "
+                              "endpoint dials above — the rate today and the rate it tends to — "
+                              "are the calibration; these two say how the curve gets from one "
+                              "to the other.")
 
     # ---- row builders (closures over d / LEVEL / MC_ACTIVE) --------------------------
     _track_css = []   # per-row playhead-track adornment CSS, injected ONCE at the sidebar end
@@ -273,7 +297,7 @@ def render(LEVEL):
         """The ONE money dial (D-080, Pavel): coverage ρ at t = 0, in PERCENT — and since
         D-093 the model's ONLY finance parameter, not a stand-in for three hidden ones.
         A base-level (Basics) control. Mirrors _target_row (MC tick, trim lane, band) with
-        the APP-SIDE envelope (state.APP_RANGES — the union of the two FIN4 bases) instead
+        the APP-SIDE envelope (state.APP_RANGES — [26, 46] since D-104 dated every leg) instead
         of a notebook target; the dimension stays app-side because it is dialled in percent
         while Params.rho is the fraction. The default seed is EXACT (100·ρ, off the 0.1
         display grid) so the round trip is bit-exact. Returns (ρ %, row)."""
@@ -347,10 +371,10 @@ def render(LEVEL):
     _tc.title(
         "Parameters",
         help="These controls set the observables and parameters of the model level you picked "
-             "above. Where a clean observable exists the control is in natural units and the "
-             "caption beneath shows the implied parameter live; dials without one sit under "
-             "*Model internals*. Defaults are the calibrated values — **Reset ↺** restores "
-             "them.")
+             "above, grouped by the mechanism they drive. Where a clean observable exists the "
+             "control is in natural units and the caption beneath shows the implied parameter "
+             "live; dials without one are stated directly. Defaults are the calibrated values — "
+             "**Reset ↺** restores them.")
     _rc.button("Reset ↺", key="resetall_btn", on_click=_reset_all,
                help="Restore all controls to their calibrated defaults.")
 
@@ -428,6 +452,21 @@ def render(LEVEL):
             lambda x: f"⇒ $\\nu$ = {x:.2f} value-OOM per OOM",
             lambda a, b: f"⇒ $\\nu \\in$ [{a:.2f}, {b:.2f}] value-OOM per OOM")
 
+    # ---- the compute PRICE leg (D-106). A full Level-1 row, not a display-only card: D-105 put
+    # the base model's break-even test in closed form, ν(g_c+g_a) > g_c − g_p, so g_p is one of
+    # exactly four numbers that decide whether the leader is ever profitable — and Epoch's grade-A
+    # interval [×1.27, ×1.54] straddles the ×1.482 threshold that flips the verdict. It sits here,
+    # between the value dial and the money dial, because that is where the equations put it (the
+    # cost block runs between value and coverage). The caption carries the implied BILL growth,
+    # which is the read-out this leg is trusted against (2.35 vs Cottier's observed 2.4×/yr) —
+    # `_gc_today` is the model's own Γ(0) and is resolved in pass 3, like the residual caption.
+    _tparam(sb, "t_price_x", "g_p",
+            lambda x: (f"⇒ $g_p$ = {x:.3f} OOM/yr (×{10.0**x:.2f}/yr cheaper) — implied "
+                       f"training-bill growth ×{10.0**(_gc_today - x):.2f}/yr "
+                       "(observed ×2.4)"),
+            lambda a, b: (f"⇒ $g_p \\in$ [{a:.3f}, {b:.3f}] OOM/yr "
+                          f"(×{10.0**a:.2f}–×{10.0**b:.2f}/yr cheaper)"))
+
     # ---- the money side: ONE dial, and since D-093 ONE PARAMETER behind it. The dial has
     # always been the coverage ratio ρ (the only identified combination — scaling earnings and
     # cost jointly moves no verdict), but until D-093 it was translated here into a hidden
@@ -462,12 +501,17 @@ def render(LEVEL):
         _tparam(sb, "t_floor_x", "g_C_inf",
                 lambda x: f"⇒ $g_{{c\\infty}}$ = {x:.2f} OOM/yr",
                 lambda a, b: f"⇒ $g_{{c\\infty}} \\in$ [{a:.2f}, {b:.2f}] OOM/yr")
-        _param(sb, "t_mid", "$t_{mid}$  slowdown midpoint (yr)", 0.5, 10.0, 0.1)
+        # D-111: the two ENDPOINTS above (today's growth in Basics, the floor here) are the
+        # calibrated dials; the midpoint and the position below are behind this button.
+        _adv_button(sb, "leader_compute", "slowdown midpoint and how far into it we are today")
+        _param(sb, "t_mid", "$t_{mid}$  slowdown midpoint (yr)", *dial("t_mid"))
         # D-084: the curve's POSITION today — the dial that resolves its slope, so it comes
         # right after the midpoint it is stated against (and reads it live in the caption).
-        # Dial bounds ARE the vetted envelope (X-12's lesson: a spot outside it snaps on
-        # entering MC mode, and the far end would be unreachable).
-        _param(sb, "p0_c", "$p^c_0$  how far into the slowdown today (%)", 1.0, 25.0, 1.0,
+        # Bounds: R11 (state.dial) — the envelope [1, 25]% padded to [1, 28]%. The FLOOR does not
+        # move, and that is the model's constraint rather than a convention: slope_span raises
+        # outside (0, 50)%, so a padded 0 or below would be an unstarted transition with infinite
+        # slope. X-12's lesson still holds inside this — the far end stays reachable.
+        _param(sb, "p0_c", "$q^c_0$  how far into the slowdown today (%)", *dial("p0_c"),
                cap=lambda v: (f"⇒ we are in the bottom **{v:.0f}%** of the curve today; it "
                               f"flattens (midpoint) in {d['t_mid']:.1f} yr and is "
                               f"{100.0 - v:.0f}% done by {2.0 * d['t_mid']:.1f} yr"))
@@ -478,28 +522,41 @@ def render(LEVEL):
         #     dimension, so it stays MC-pinned (point default; envelope → calibration round).
         if _vis("eta", "beta0", "gamma"):
             sb.subheader("Dynamics — algorithms speed up")
-        eta_options = ["1 (weighted avg)", "0.61", "0 (Cobb-Douglas)", "-2 (complements)",
-                       "min (Leontief)"]
+        # R8 (Pavel: "Remove Leontief from the options"). The "min (Leontief)" entry is GONE, and
+        # with it the whole η → −∞ branch of this sidebar. The LIMIT itself stays in the model —
+        # `Params.leontief` / `_ces_bracket` / `alpha_from_loss` are the mathematics of the CES
+        # family's endpoint and are tested there (test_alpha_observable's test_03) — so this is a
+        # dial change, not a model change. The widget pins the flag False, explicitly, the way it
+        # pins τ and φ_RD: `render` promises every parameter is set with no dataclass fallback.
+        eta_options = ["1 (weighted avg)", "0.61", "0 (Cobb-Douglas)", "-2 (complements)"]
         eta_values = {"1 (weighted avg)": 1.0, "0.61": 0.61, "0 (Cobb-Douglas)": 1e-9,
-                      "-2 (complements)": -2.0, "min (Leontief)": -2.0}
-        eta_default = next((o for o in eta_options
-                            if abs(eta_values[o] - P0.eta) < 1e-6 and not P0.leontief),
-                           "min (Leontief)" if P0.leontief else eta_options[0])
+                      "-2 (complements)": -2.0}
+        eta_default = next((o for o in eta_options if abs(eta_values[o] - P0.eta) < 1e-6),
+                           eta_options[0])
         if _vis("eta"):
             _erow = sb.container(key="row_eta")
             _row_head(_erow, "$\\eta$  CES exponent (compute–labor)", "eta",
                       tip=SHORT_TIP.get("eta"))
             ec1, ecr = _erow.columns([6.6, 0.4], vertical_alignment="center")
+            # a session carried over from before R8 can still hold "min (Leontief)", which a
+            # selectbox cannot show and `eta_values` cannot look up — clamp it to the default
+            # BEFORE the widget instantiates, the same way state.level() clamps a retired level
+            _reg("w_eta", eta_default)
+            if S.get("w_eta") not in eta_values:
+                S["w_eta"] = eta_default
             eta_choice = ec1.selectbox("$\\eta$  CES exponent (compute–labor substitution)",
-                                       eta_options, key=_reg("w_eta", eta_default),
+                                       eta_options, key="w_eta",
                                        help=INTERP.get("eta"), label_visibility="collapsed")
             ecr.button("↺", key="r_eta", help="reset to default", on_click=_reset_one,
                        args=("w_eta", eta_default))
             S["_eta_mem"] = eta_choice   # survives the widget's GC while filtered out
         else:
             eta_choice = S.get("_eta_mem", S.get("w_eta", eta_default))
-        d["leontief"] = eta_choice.startswith("min")
+            if eta_choice not in eta_values:
+                eta_choice = eta_default
+        d["leontief"] = False
         d["eta"] = eta_values[eta_choice]
+        _eta_disp = eta_choice.split(" ", 1)[0]   # "1" / "0.61" / "0" / "-2", for the α caption
         # α sits directly beneath η because they are the two halves of one bracket: η says how
         # substitutable the inputs are, α how much weight the compute one carries. D-098 dials α
         # through the OBSERVABLE (the drag), not the weight, so that holding the drag fixed while
@@ -513,33 +570,29 @@ def render(LEVEL):
         # `sidebar_filter_keys`, which is derived from `subsection_param_entries`, and that table
         # is keyed by parameter throughout (t_compute_x is gated by g_C0 the same way). Gating on
         # "loss_half_gC" made this row unreachable in the default Level-2 view — D-098 follow-up.
-        _alpha_vis = _vis("alpha")
-        if d["leontief"]:
-            # DECLARED EXCEPTION to the delivered-exactly rule (D-098). On the Leontief branch
-            # the bracket is min(·) and never reads α: the model loses exactly 50% whatever the
-            # slider says. Rather than show a dial that silently lies, the row is DISABLED and
-            # says why — and the » panel still opens, because the evidence is worth reading even
-            # where the dial is inert. Hiding it instead would teach the user nothing about why
-            # it went away.
-            if _alpha_vis:
-                _lrow = sb.container(key="row_loss_half_gC")
-                _row_head(_lrow, TSPEC["loss_half_gC"][0], "alpha",
-                          tip=SHORT_TIP_T.get("loss_half_gC"), row_id="row_loss_half_gC")
-                _lrow.slider(TSPEC["loss_half_gC"][0], 22.0, 50.0, value=50.0, step=0.5,
-                             key="w_loss_half_gC_leontief", disabled=True,
-                             format="%.1f", label_visibility="collapsed")
-                _lrow.caption(":red[**Inert under Leontief.**] The scarcer input rules, so the "
-                              "drag is exactly **50 %** and $\\alpha$ has no effect. Pick "
-                              "another $\\eta$ to dial it.")
-            d["alpha"] = P0.alpha        # value of record; provably unread by the min() branch
-        else:
-            _loss, _ = _target_row(sb, "loss_half_gC", "alpha", visible=_alpha_vis)
-            d["alpha"] = m.alpha_from_loss(float(_loss) / 100.0, d["eta"], False)
+        #
+        # ROUTED THROUGH `_tparam` (audit A/6, FM-5). R8 removed the Leontief fork above, and with
+        # it the disabled placeholder slider that fork rendered — a widget keyed
+        # `w_loss_half_gC_leontief`, seeded at 50.0, above its own vetted envelope [22, 45]. What
+        # is left is the ordinary target row, and it now goes through the SAME path every other
+        # observable takes. Before this it called `m.alpha_from_loss` INLINE, so loss_half_gC never
+        # entered `tg` and never reached the one `_invert()` below, even though `m.invert_targets`
+        # has carried the branch since D-098 — two implementations of one inversion, and the row
+        # was the only target with no ⇒ caption. It gains one, and the caption names the active η:
+        # D-098's headline property is that the delivered α MOVES with the substitution setting
+        # (adopting Epoch's 0.67 gives 0.67 at η = 1 and 0.44 at η = −2), and the widget was
+        # showing nothing that moved.
+        _tparam(sb, "loss_half_gC", "alpha",
+                lambda a: (f"⇒ $\\alpha$ = {a:.2f} at $\\eta$ = {_eta_disp} — the weight the "
+                           "model delivers for the drag you stated; it moves with $\\eta$, so "
+                           "the bottleneck evidence is counted once (D-098)"),
+                lambda a, b: (f"⇒ $\\alpha \\in$ [{a:.2f}, {b:.2f}] at $\\eta$ = "
+                              f"{_eta_disp}"))
         # β₀ and γ are the LEVEL and the GROWTH of the same object, so the two rows are
         # written to read as a pair (Pavel: the old "ψ compounding" "is not understandable…
         # how about something in the sense of RSI growth"). β₀ is dimensionless and was NOT
         # touched by D-091's base-10 rescale.
-        _param(sb, "beta0", "$\\beta_0$  AI R&D speedup today", 0.0, 0.6, 0.05)
+        _param(sb, "beta0", "$\\beta_0$  AI R&D speedup today", *dial("beta0"))
         if _vis("gamma"):
             freeze = sb.checkbox("Freeze AI assistance ($\\gamma = 0$)", key=_reg("w_freeze",
                                  bool(S.get("_freeze_mem", P0.gamma == 0.0))),
@@ -554,20 +607,21 @@ def render(LEVEL):
         if freeze:
             d["gamma"] = 0.0
         else:
-            # BOUNDS RESCALED (D-091 gap, caught here): γ went to base 10 — decades of R&D
-            # speed per OOM — but this slider kept its nats bounds, so its whole meaningful
-            # region (blow-up at ≈0.182) sat in the first fifth of the track with only four
-            # reachable steps below it. 0.45 / 0.02 preserves the old span (1.0/ln10 = 0.434)
-            # and the old resolution (9 steps below the threshold vs 8 before), in round
-            # numbers rather than 0.4343 / 0.0217.
+            # BOUNDS: R11, like every other free dial (state.dial). The step stays 0.02 —
+            # D-091's gap was that γ went to base 10 while the slider kept its nats bounds, so
+            # the whole meaningful region (blow-up at ≈0.182) sat in the first fifth of a track
+            # running to 0.45. R11 finishes that fix from the other end: the reach is now the
+            # envelope [0, 0.174] padded to 0.20, so the blow-up threshold is one step from the
+            # top instead of two-fifths along, and the 0.45 tail — which no calibration defends —
+            # is gone. The floor stays 0, which is the freeze switch's value and meaningful.
             _param(sb, "gamma", "$\\gamma$  how fast that speedup grows (/OOM)",
-                   0.0, 0.45, 0.02)
+                   *dial("gamma"))
         # (3) cost rider:  B_t = 10^{c^L_{t+ℓ}−c^L_ℓ}·10^{−g_p t}  →  ℓ
         # (D-090 re-based the exponent on c^L_ℓ and D-093 normalised the constant away, which
         # together make B₀ = 1 at every level and every dial — ℓ tilts the path, not the anchor.)
         if _vis("ell"):
             sb.subheader("Dynamics — training paid in advance")
-        _param(sb, "ell", "$\\ell$  lead time (yr)", 0.25, 3.0, 0.05)
+        _param(sb, "ell", "$\\ell$  lead time (yr)", *dial("ell"))
         # (4) value rider (D-083):  w'(x) = S(x; ν, ν_∞, x_mid)  →  ν_∞ + the transition
         # midpoint x_mid (ν is a Basics dial; the ceiling W̄ is retired)
         if _vis("x_mid", "nu_inf", "p0_w"):
@@ -578,53 +632,80 @@ def render(LEVEL):
                            f"{x * (d['g_C_inf'] + d['g_a']):.2f} asymptotically (at today's "
                            "algo rate)"),
                 lambda a, b: f"⇒ $\\nu_\\infty \\in$ [{a:.2f}, {b:.2f}] value-OOM per OOM")
-        # X-12 (extensions-sync): dial bounds = the vetted envelope PARAM_RANGES['x_mid'] —
-        # a spot below the envelope floor used to snap on entering MC mode, and the envelope
-        # ceiling was unreachable. (Envelope [2, 20] itself stays flagged → calibration round.)
-        _param(sb, "x_mid", "$x_{mid}$  transition midpoint (OOM)", 2.0, 20.0, 0.5)
+        # D-111: ν (Basics) and ν_∞ (above) are this curve's endpoints; the bend's midpoint and
+        # position are advanced — and its OWN button, independent of the compute curve's.
+        _adv_button(sb, "value", "easing midpoint and how far into it we are today")
+        # Bounds: R11 (state.dial) — the envelope [2, 20] padded to [0.5, 22]. The floor is the
+        # first grid point above 0 because the curve's slope is span/x_mid, so 0 divides by zero.
+        # This is the widest padding in the table in RATIO terms (0.5 vs a floor of 2), which is
+        # inherent to an additive 10%-of-width rule on an envelope 10× wider than its own floor —
+        # and it matters here more than elsewhere: D-107 measured x_mid as the GATE on whether
+        # ν_∞ can bite at all. (Envelope [2, 20] itself stays flagged → calibration round.)
+        _param(sb, "x_mid", "$x_{mid}$  transition midpoint (OOM)", *dial("x_mid"))
         # D-084: this curve's OWN position dial (the value easing is a different empirical
         # claim from the compute slowdown, so it gets its own), after the midpoint it reads.
-        _param(sb, "p0_w", "$p^w_0$  how far into the easing today (%)", 1.0, 25.0, 1.0,
+        _param(sb, "p0_w", "$q^w_0$  how far into the easing today (%)", *dial("p0_w"),
                cap=lambda v: (f"⇒ today's slope is already **{v:.0f}%** of the way from "
                               f"$\\nu$ down to $\\nu_\\infty$; half-done at "
                               f"{d['x_mid']:.1f} OOM, {100.0 - v:.0f}% by "
                               f"{2.0 * d['x_mid']:.1f} OOM"))
 
     # -------------------------------------------------- Level 3: Catch-up channels
-    # Δ0, δ_dev, δ_rel are driven by the Follower-lag target in Basics (wedge-split inversion); the
-    # follower's OWN engine stays raw and feeds the lag caption's wedge live.
+    # R7 (Pavel: "This is correct division"). ONE rung of the ladder, TWO labelled groups — and
+    # the division IS the question the level exists to answer: does the follower keep up by BUYING
+    # COMPUTE, or by ABSORBING THE LEADER'S PROGRESS? The two subheadings are the two answers, so
+    # a reader who only reads the headings has still learned what Level 3 is for.
+    #
+    # Grouping only: no level machinery, pins, MC envelopes or fixtures move. In particular
+    # LEVEL_RANGED[3] keeps its frozen order (mc_draw_batch consumes it in order) — this reorders
+    # what is on SCREEN, not what is drawn.
+    #
+    # The nine parameters R7 divides are exactly `sidebar_filter_keys(3)`, but only six of them
+    # have a row here: Δ0, δ_dev and δ_rel are all set by the ONE Fringe-lag observable up in
+    # Basics (D-037's wedge-split inversion), so the second group says so out loud rather than
+    # promising five dials and showing two. The follower's own engine stays raw and feeds the lag
+    # caption's wedge live.
+    #
+    # `split` moves here from "Model internals (no clean observable)", which it was the last
+    # occupant of and which therefore disappears. That heading grouped dials by GRADE; R7 groups
+    # them by MECHANISM, and split — how much of the initial gap is algorithmic — is a spillover
+    # question, not a leftover. It is still a grade-F judgment call, and its own card says so.
     if LEVEL >= 3:
-        if _vis("g_a_F", "g_CF0", "g_CF_inf", "t_mid_F", "p0_F"):
-            sb.subheader("Catch-up channels — follower engine")
-        # X-10 (extensions-sync): the dial is the follower/leader SHARE — the same object the
-        # MC prior draws (scale_of g_a) and the evidence states (Gundlach's 0.6–0.8× band), so
-        # moving the effective-compute dial keeps the documented relation g_a^F = share·g_a
-        # instead of silently breaking an absolute rate. Dial bounds = the vetted envelope.
-        # d["g_a_F"] holds the SHARE until the derive pass turns it into the rate (it needs the
-        # inverted g_a, which pass 1 does not have).
-        _param(sb, "g_a_F", "$g_a^F$  algo rate — share of the leader's", 0.5, 0.9, 0.01,
-               dial_default=0.7,
-               cap=lambda s_: (f"⇒ $g_a^F$ = {s_ * d['g_a']:.2f} OOM/yr "
-                               f"({100 * s_:.0f}% of the leader's $g_a$)"))
-        _param(sb, "g_CF0", "$g_c^F$  fringe compute growth (OOM/yr)", 0.2, 0.8, 0.05)
-        _param(sb, "g_CF_inf", "$g_{c\\infty}^F$  growth floor (OOM/yr)", 0.0, 0.4, 0.01)
-        _param(sb, "t_mid_F", "$t_{mid}^F$  slowdown midpoint (yr)", 0.5, 10.0, 0.1)
-        # D-084: the fringe curve's own position — never silently tied to the leader's p^c_0
-        _param(sb, "p0_F", "$p^F_0$  how far into the slowdown today (%)", 1.0, 25.0, 1.0,
+        if _vis("g_CF0", "g_CF_inf", "t_mid_F", "p0_F"):
+            sb.subheader("The fringe's own compute")
+            sb.caption("It **buys its own compute** and runs its own curve — same shape as the "
+                       "leader's, its own floor, midpoint and position.")
+        _param(sb, "g_CF0", "$g_c^F$  fringe compute growth (OOM/yr)", *dial("g_CF0"))
+        _param(sb, "g_CF_inf", "$g_{c\\infty}^F$  growth floor (OOM/yr)", *dial("g_CF_inf"))
+        # D-111: same rule for the fringe's own curve — its two endpoints stay, its midpoint and
+        # position sit behind its own button.
+        _adv_button(sb, "follower", "slowdown midpoint and how far into it the fringe is today")
+        _param(sb, "t_mid_F", "$t_{mid}^F$  slowdown midpoint (yr)", *dial("t_mid_F"))
+        # D-084: the fringe curve's own position — never silently tied to the leader's q^c_0
+        _param(sb, "p0_F", "$q^F_0$  how far into the slowdown today (%)", *dial("p0_F"),
                cap=lambda v: (f"⇒ the fringe is in the bottom **{v:.0f}%** of its curve today; "
                               f"midpoint in {d['t_mid_F']:.1f} yr, {100.0 - v:.0f}% done by "
                               f"{2.0 * d['t_mid_F']:.1f} yr"))
-
-    # -------------------------------------------------- Model internals (free dials, D-037)
-    # Dials with NO clean observable (grades C/F) — judgment calls, not targets. After the
-    # D-081 equation-order addendum moved γ/β₀/t_mid/x_mid (and the η choice) into their
-    # Dynamics groups, only `split` remains here (its Δ0-split line rides the follower
-    # subsection, but Pavel's ordering ruling covers the Level-2 dials; split keeps its
-    # internals home).
-    if LEVEL >= 3:
-        if _vis("split"):
-            sb.subheader("Model internals (no clean observable)")
-        _param(sb, "split", "algo share of $\\Delta_0$", 0.2, 0.9, 0.05)
+        if _vis("g_a_F", "split", "Delta0", "delta_dev", "delta_rel"):
+            sb.subheader("Spillovers & catch-up")
+            sb.caption("It **absorbs the leader's progress** — through talent and published "
+                       "methods ($\\delta_{dev}$) and by distilling the released model "
+                       "($\\delta_{rel}$). Both channels, and the initial gap $\\Delta_0$, are "
+                       "set by the one **Fringe lag** dial in *Basics*; these two dials say how "
+                       "much of the leader's algorithmic progress the fringe reproduces by "
+                       "itself, and how the gap divides between algorithms and compute.")
+        # X-10 (extensions-sync): the dial is the follower/leader SHARE — the same object the
+        # MC prior draws (scale_of g_a) and the evidence states (Gundlach's 0.6–0.8× band), so
+        # moving the effective-compute dial keeps the documented relation g_a^F = share·g_a
+        # instead of silently breaking an absolute rate. Bounds: R11 (state.dial) — the envelope
+        # [0.5, 0.9] padded to [0.46, 0.94].
+        # d["g_a_F"] holds the SHARE until the derive pass turns it into the rate (it needs the
+        # inverted g_a, which pass 1 does not have).
+        _param(sb, "g_a_F", "$g_a^F$  algo rate — share of the leader's", *dial("g_a_F"),
+               dial_default=0.7,
+               cap=lambda s_: (f"⇒ $g_a^F$ = {s_ * d['g_a']:.2f} OOM/yr "
+                               f"({100 * s_:.0f}% of the leader's $g_a$)"))
+        _param(sb, "split", "algo share of $\\Delta_0$", *dial("split"))
 
     # ---- RETIRED levels (Pavel's ladder amendment, 2026-07-27) -------------------------
     # Release delay (old L7): x^R-parked in the spec (N9). Cost mechanism (old L8): retired —
@@ -641,7 +722,7 @@ def render(LEVEL):
     # now produces g_C0, g_a, ν, ν_∞, g_c∞, Δ0, the catch-up channels and the money anchors in a
     # single call, at the FULL effective context. That is what makes the D-086 guarantee hold in
     # the app: today's compute growth, today's effective growth and the fringe lag stay on their
-    # dialled values at every p₀ᶜ and every compute floor, because the residual and the lag
+    # dialled values at every q₀ᶜ and every compute floor, because the residual and the lag
     # conversion finally see the Dynamics dials that the group below Basics writes.
     #
     # Seeds. `apply_level_pins` ties g_c∞ := g_c and ν_∞ := ν at Level 1, so the base needs those
