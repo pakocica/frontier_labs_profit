@@ -11,12 +11,21 @@ SRC="${1:-/Users/macbook/Library/CloudStorage/GoogleDrive-pakocica@gmail.com/My 
 
 [ -f "$SRC/app.py" ] || { echo "error: $SRC does not look like the widget dir (no app.py)"; exit 1; }
 
+# The top-level widget modules the app imports. Listed EXPLICITLY rather than as src/*.py so that
+# model_demo.py — matplotlib illustrations, never imported by the app — cannot reach the bundle.
+# D-085 retired model_notebook.ipynb + notebook_loader.py; D-110 split the calibration source
+# menus out of model.py into cal_sources.py. A module missing from this list is a WHITE SCREEN on
+# the live site while the model repo's tests stay green.
+APP_MODULES=(app.py model.py cal_sources.py)
+# Checked BEFORE the rm -rf below, so a list that has gone stale cannot destroy src/ on its way
+# to failing — the destructive step runs only once every named source is known to exist.
+for f in "${APP_MODULES[@]}"; do
+  [ -f "$SRC/$f" ] || { echo "error: $SRC/$f is missing — this list is stale w.r.t. the widget"; exit 1; }
+done
+
 rm -rf "$REPO/src"
 mkdir -p "$REPO/src/ui" "$REPO/src/mc_component"
-# The model is a plain-Python module now (D-085: model_notebook.ipynb + notebook_loader.py were
-# retired when the model left the notebook). Listed EXPLICITLY rather than as src/*.py so that
-# model_demo.py — matplotlib illustrations, never imported by the app — cannot reach the bundle.
-cp "$SRC/app.py" "$SRC/model.py" "$REPO/src/"
+for f in "${APP_MODULES[@]}"; do cp "$SRC/$f" "$REPO/src/"; done
 cp "$SRC"/ui/*.py "$REPO/src/ui/"
 cp "$SRC/mc_component/index.html" "$REPO/src/mc_component/"
 
@@ -40,9 +49,29 @@ done
 # SCREEN, not a degraded page. This script rm -rf's src/ before copying, so a stale filename above
 # would destroy the sources and ship nothing — which is exactly what happened to the two retired
 # notebook filenames. Fail before anything can be committed.
-for f in app.py model.py; do
+for f in "${APP_MODULES[@]}"; do
   [ -f "$REPO/src/$f" ] || { echo "error: $REPO/src/$f is missing — the model source did not sync; the app cannot import it"; exit 1; }
 done
+
+# Guard (D-110): the same class, caught GENERICALLY rather than one filename at a time. The D-085
+# breakage was silent because only the hard-coded list above knew a file existed — so here every
+# module the SHIPPED sources import is checked to have shipped too. A module that exists in the
+# widget dir but not in src/ is one the list forgot; anything else (stdlib, numpy, streamlit) has
+# no file in the widget dir and is skipped.
+missing=0
+for f in "$REPO"/src/*.py "$REPO"/src/ui/*.py; do
+  [ -f "$f" ] || continue
+  mods=$(grep -hoE '^[[:space:]]*(from|import)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' "$f" \
+         | awk '{print $2}' | LC_ALL=C sort -u)
+  for mod in $mods; do
+    [ -f "$SRC/$mod.py" ] || continue          # not a top-level widget module
+    [ -f "$REPO/src/$mod.py" ] || {
+      echo "error: src/$(basename "$f") imports '$mod', but $mod.py did not ship — add it to APP_MODULES"
+      missing=1
+    }
+  done
+done
+[ "$missing" -eq 0 ] || { echo "error: the shipped sources import modules that are not in the bundle"; exit 1; }
 
 echo "synced from: $SRC"
 (cd "$REPO" && git status --short) || true
