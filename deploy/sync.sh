@@ -16,7 +16,7 @@ SRC="${1:-/Users/macbook/Library/CloudStorage/GoogleDrive-pakocica@gmail.com/My 
 # D-085 retired model_notebook.ipynb + notebook_loader.py; D-110 split the calibration source
 # menus out of model.py into cal_sources.py. A module missing from this list is a WHITE SCREEN on
 # the live site while the model repo's tests stay green.
-APP_MODULES=(app.py model.py cal_sources.py)
+APP_MODULES=(app.py model.py cal_sources.py model_params.py model_dynamics.py model_profit.py model_calibration.py model_montecarlo.py)
 # Checked BEFORE the rm -rf below, so a list that has gone stale cannot destroy src/ on its way
 # to failing — the destructive step runs only once every named source is known to exist.
 for f in "${APP_MODULES[@]}"; do
