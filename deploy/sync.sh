@@ -61,8 +61,10 @@ done
 missing=0
 for f in "$REPO"/src/*.py "$REPO"/src/ui/*.py; do
   [ -f "$f" ] || continue
+  # `|| true`: a file with no imports at all (ui/__init__.py is pure docstring) makes grep exit
+  # 1, and under `set -o pipefail` that would abort the whole sync with no message.
   mods=$(grep -hoE '^[[:space:]]*(from|import)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' "$f" \
-         | awk '{print $2}' | LC_ALL=C sort -u)
+         | awk '{print $2}' | LC_ALL=C sort -u || true)
   for mod in $mods; do
     [ -f "$SRC/$mod.py" ] || continue          # not a top-level widget module
     [ -f "$REPO/src/$mod.py" ] || {
