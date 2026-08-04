@@ -72,7 +72,7 @@ window.FLPTour = (function () {
       title: "Build the model up, one mechanism at a time",
       list: [
         ["Levels", "Start from the bare steady-growth model and <b>add mechanisms level by level</b> &mdash; first the dynamics (a compute slowdown racing AI-accelerated R&amp;D), then the follower's catch-up channels&hellip;"],
-        ["Calibrate", "Move <b>observables you can argue about</b> &mdash; compute scaling, follower lag, margins &mdash; and watch the implied parameters update live."],
+        ["Calibrate", "Move <b>observables you can argue about</b> &mdash; compute scaling, follower lag, coverage today &mdash; and watch the implied parameters update live."],
         ["See", "The <b>coverage ratio</b> &mdash; earnings over the model-building bill, 100% = break-even &mdash; and the <b>capability gap</b> between leader and follower."]
       ] },
 
@@ -90,9 +90,9 @@ window.FLPTour = (function () {
     { kind: "eq", eyebrow: "01 &middot; The race",
       title: "Capability climbs at a steady pace",
       eq: [ line(V("c&#775;") + S("L") + b("t") + o("=") + V("g") + b("c") + '<span class="amp">and</span>' + V("a&#775;") + S("L") + b("t") + o("=") + V("g") + b("a")) ],
-      gloss: "Both parts rise at a fixed pace each year. Together the frontier advances &asymp; <b>1.06 OOM/yr</b>, roughly an 11&times; yearly gain in effective compute.",
+      gloss: "Both parts rise at a fixed pace each year. Together the frontier advances &asymp; <b>1.05 OOM/yr</b>, roughly an 11&times; yearly gain in effective compute.",
       params: [
-        [V("g") + b("c"), "0.511 OOM/yr", "frontier compute &times;3.24 / yr &mdash; Epoch's capability-frontier series"],
+        [V("g") + b("c"), "0.511 OOM/yr", "frontier compute &times;3.24 / yr &mdash; where two routes meet: the dollar identity (bill growth &times; hardware price-performance) and Epoch's capability-frontier reading"],
         [V("g") + b("a"), "0.544 OOM/yr", "algorithmic progress &times;3.5 / yr &mdash; the residual of &times;11.3 / yr effective compute"]
       ] },
 
@@ -108,12 +108,12 @@ window.FLPTour = (function () {
     { kind: "eq", eyebrow: "03 &middot; Value",
       title: "What capability is worth",
       eq: [ line(V("W") + "(" + V("x") + ")" + o("=") + "10" + S(V("&nu;") + V("x"))) ],
-      gloss: "Value is an <b>index of today's frontier</b> &mdash; W(0) = 1 &mdash; and climbs with capability: <b>each order of magnitude is worth several times the last</b>. Here it compounds without limit; in a later level the slope eases toward a long-run floor. How steep the climb is (&nu;) isn't tightly pinned down &mdash; it's one of the dials you set in the explorer." },
+      gloss: "Value is an <b>index of today's frontier</b> &mdash; W(0) = 1 &mdash; and climbs with capability: <b>each order of magnitude is worth about twice the last</b>. Here it compounds without limit; in a later level the slope eases toward a long-run floor. How steep the climb is (&nu;) isn't tightly pinned down &mdash; it's one of the dials you set in the explorer." },
 
     { kind: "eq", eyebrow: "04 &middot; Cost",
       title: "Paying for the compute",
       eq: [ line(V("B") + b("t") + o("=") + "10" + S(V("c") + S("L") + b("t") + "&minus;" + V("g") + b("p") + V("t"))) ],
-      gloss: "The bill is the compute of the model running <b>now</b>, at prices that fall each year. It is measured in <b>multiples of today's training spend</b>, so <i>B</i>&#8320; = 1 &mdash; yet the bill still grows &asymp; <b>2.35&times;/yr</b>: compute scales faster than prices drop.",
+      gloss: "The bill is the compute of the model running <b>now</b>, at prices that fall each year. It is measured in <b>multiples of today's model-building bill</b>, so <i>B</i>&#8320; = 1 &mdash; yet the bill still grows &asymp; <b>2.35&times;/yr</b>: compute scales faster than prices drop.",
       params: [
         [V("g") + b("p"), "0.14 OOM/yr", "hardware price-performance &times;1.38 / yr (Epoch) &mdash; measured; the &times;2.35 bill growth is a read-out, not an input"]
       ] },
@@ -133,12 +133,12 @@ window.FLPTour = (function () {
         '<span class="big">' + V("&nu;") + "(" + V("g") + b("c") + o("+") + V("g") + b("a") + ")"
           + o("&gt;") + V("g") + b("c") + o("&minus;") + V("g") + b("p") + "</span>"
       ],
-      gloss: "With value compounding and the gap steady, the whole question collapses to a <b>race between two growth rates</b>. The explorer reports it as <b>coverage</b> &mdash; earnings over the bill, today &asymp; 34%, break-even at 100%. When the inequality holds &mdash; the value of the lead outpacing the cost of holding it &mdash; coverage crosses 100% and stays there; otherwise, never. Nudge value-per-OOM past the pivot and the verdict flips." },
+      gloss: "With value compounding and the gap steady, the whole question collapses to a <b>race between two growth rates</b>. The explorer reports it as <b>coverage</b> &mdash; earnings over the bill, today &asymp; 33%, break-even at 100%. When the inequality holds &mdash; the value of the lead outpacing the cost of holding it &mdash; coverage crosses 100% and stays there; otherwise, never. Nudge value-per-OOM past the pivot and the verdict flips." },
 
     { kind: "outro",
       eyebrow: "The full picture",
       title: "There's a lot more to explore",
-      gloss: "The explorer layers more mechanisms on top of this basic model &mdash; a compute slowdown racing AI-accelerated R&amp;D, training bills paid years ahead, a value slope that eases, and the follower's own engine with two catch-up channels &mdash; and lets you test which ones actually change the verdict.",
+      gloss: "The explorer layers more mechanisms on top of this basic model &mdash; a compute slowdown racing AI-accelerated R&amp;D, training bills paid months ahead, a value slope that eases, and the follower's own engine with two catch-up channels &mdash; and lets you test which ones actually change the verdict.",
       // phone (D-073): the deck is the whole, TERMINAL phone experience — no widget to
       // send to, so this is a plain signpost, not a link. laptop: you're already there —
       // the overlay's own button does the leaving, so footLaptop is a quiet reassurance.

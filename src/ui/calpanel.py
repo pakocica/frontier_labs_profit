@@ -20,6 +20,8 @@ from .content import (GRADES, INTERP, TSPEC, _CAL_ALT, _CAL_TARGET, _DELTA_MERGE
                       fmt_dial_value, lag_note,
                       _MATH_LABEL, _fmt_range, _sub_live)
 from .model_access import m, _PARAM_TO_TARGET
+from . import levels
+from .levels import level_sample_keys
 from .state import (_active_rng, _active_span, _base_rng, _gc0_sym, _tbounds, _tbounds_of,
                     _use_range, _use_source, cal_open, close_cal, level, mc_active)
 
@@ -78,7 +80,7 @@ _BASIS_DISCLOSURE = (
     "mid-year flow, a *run-rate* is the flow at its own month, and ***mixed* means the row failed "
     "that test** — it is not a coverage reading at any date, and restating it on one date is worth "
     "≈1.4–1.5× on the ratio, far more than the margin-definition question. Which instant one "
-    "picks is worth only ±3.5% per half-year. (D-104, settling FIN4)")
+    "picks is worth only ±3.5% per half-year.")
 
 
 def _grade_chip(rw):
@@ -110,14 +112,23 @@ def _basis_chip(rw):
 #
 # So each row draws the parameter's whole ENVELOPE as a short number line and puts the source on
 # it: its POINT as a dot (adopts the spot) and, where it reports one, its INTERVAL as a bracket
-# (adopts the MC crop). The rail also carries the parameter's CURRENT crop as a faint band, so a
-# source that falls outside today's sampling range is visibly outside before you click it.
+# (adopts the MC crop).
+#
+# D-134 REMOVED THE ACTIVE-SPAN BAND. The rail used to carry the parameter's CURRENT crop behind
+# the row's own furniture, so a source falling outside today's sampling range was visibly outside
+# before you clicked it. Pavel struck it: "I don't want the currently chosen confidence interval
+# to be shown on the clickable dials in the calibration, it is just confusing. Instead, only keep
+# the confidence range for the specific variable." One chosen span repeated identically down every
+# row of a menu reads as a property OF the rows, which it is not — each row's own interval is the
+# per-row object, and the chosen span belongs to the variable, where the sidebar's two-handle trim
+# lane shows it once. What the rail still says about the chosen span is the ✓ on the bracket whose
+# interval is the one currently adopted; that is a statement about THIS row, so it stays.
 #
 # THE CONSTRAINT AND HOW IT IS SOLVED. Streamlit cannot take clicks from injected HTML without a
 # bidirectional custom component, and we are not building one (parked with the 3-point slider).
 # So the two click targets are NATIVE `st.button`s, absolutely positioned from server-computed
-# percentages, and everything that is not a click target — track, crop band, envelope end labels,
-# interval end labels, dead markers, out-of-envelope chevrons — is ONE injected markdown block
+# percentages, and everything that is not a click target — track, envelope end labels, interval
+# end labels, dead markers, out-of-envelope chevrons — is ONE injected markdown block
 # behind them. This is the same idiom D-079's collapsed-row crop band already uses: the server
 # knows the fractions, CSS draws them, and no client state exists. Adoption marks are likewise
 # server-side: the row's own CSS is emitted in the adopted variant, and the button LABEL carries a
@@ -153,10 +164,7 @@ _RAIL_CSS = """
 .st-key-calpanel .mrail{position:relative;height:46px;margin:2px 0 0;}
 .st-key-calpanel .mtrack{position:absolute;left:6px;right:6px;top:20px;height:3px;
   background:rgba(var(--accent-rgb),0.10);border-radius:2px;}
-.st-key-calpanel .mcrop{position:absolute;top:19px;height:5px;border-radius:2px;
-  background:linear-gradient(90deg,rgba(var(--accent-rgb),0.75) 0 2px,
-    rgba(var(--accent-rgb),0.20) 2px calc(100% - 2px),
-    rgba(var(--accent-rgb),0.75) calc(100% - 2px) 100%);}
+/* (the .mcrop active-span band left with D-134 — its rule is deleted rather than orphaned) */
 .st-key-calpanel .mends{position:absolute;top:31px;font-size:9px;opacity:0.40;
   font-variant-numeric:tabular-nums;}
 .st-key-calpanel .mends.l{left:2px} .st-key-calpanel .mends.r{right:2px}
@@ -175,8 +183,8 @@ _RAIL_CSS = """
 .st-key-calpanel .mbrkd{position:absolute;top:25px;height:6px;
   border:1px dashed rgba(var(--accent-rgb),0.35);border-top:0;border-radius:0 0 2px 2px;}
 /* DISCRETE rail (η): the dial's option positions, drawn as faint stops with their values under
-   them, so the row's own dot is read against what the menu actually offers. No crop band and no
-   bracket — the dimension is never sampled, so neither object exists for it. */
+   them, so the row's own dot is read against what the menu actually offers. No bracket — the
+   dimension is never sampled, so there is no crop for a row to adopt. */
 .st-key-calpanel .mopt{position:absolute;top:18px;transform:translateX(-50%);width:7px;
   height:7px;border-radius:50%;background:rgba(var(--accent-rgb),0.28);}
 .st-key-calpanel .moptl{position:absolute;top:31px;transform:translateX(-50%);font-size:9px;
@@ -211,15 +219,38 @@ _RAIL_CSS = """
 """
 
 
+def _never_drawn(ekey):
+    """True for a dimension the app's Monte Carlo can never draw, at ANY level.
+
+    `mc_draw_batch` consumes `level_sample_keys`, so a key with a parameter-space envelope but no
+    LEVEL_RANGED entry is pinned however its tick is set. Asked against MAX_LEVEL rather than the
+    current level, deliberately: this is a property of the dimension, not of where the reader
+    happens to be standing, so a panel left open across a level change cannot flip its answer.
+
+    eta is the only such dimension with a menu, and by Pavel's own ruling — "There won't be
+    interval, MC uses spot value for this parameter". The panel therefore offers it no interval
+    bracket: a [choose range] on a dial nobody samples would set a crop nothing reads, which is
+    exactly the dead-affordance class D-087 removed elsewhere. (Until D-134 this gate also
+    suppressed the rail's active-span band; that band is now gone from every rail, so the gate is
+    about the BRACKET alone — and about the header line that offers it.)"""
+    return ekey is not None and ekey not in level_sample_keys(levels.MAX_LEVEL)
+
+
 def _mini_rail(pkey, i, rw, env, ekey, wkey, lo, hi, mode_mc, css, opts=None):
     """One source row's rail. Returns nothing; appends per-row CSS to `css` and renders the
     furniture plus up to two native buttons into the current container.
 
     `opts` non-None makes the rail DISCRETE (Pavel, 2026-07-29, reversing 650bdba's suppression):
     the dial takes only the listed values, so the furniture draws a stop at each of them with its
-    number underneath, the row's own value is a dot on top, and there is NEITHER an interval
-    bracket NOR a crop band — η is never sampled, so neither object exists for it. The envelope
-    end labels are dropped too, because the first and last stops already carry them.
+    number underneath, the row's own value is a dot on top, and the envelope end labels are
+    dropped because the first and last stops already carry them. DORMANT since D-125 made η
+    continuous — η was the only `choice` dimension, and deleting this path outright is Pavel's
+    own call (the rail was his reversal) rather than the implementer's.
+
+    The no-bracket behaviour η had under the discrete rail is now carried by `_never_drawn`
+    instead, which states the real reason for it: η is never sampled, so there is no crop for a
+    row to adopt. That reason survives the rail; the discreteness did not. (The other half of
+    what `_never_drawn` used to suppress — the active-span band — left every rail with D-134.)
 
     Row states, all four required by the brief:
       · point + interval  — dot and bracket, both adoptable (the bracket only in Monte-Carlo
@@ -260,7 +291,7 @@ def _mini_rail(pkey, i, rw, env, ekey, wkey, lo, hi, mode_mc, css, opts=None):
         ci_a, ci_b = frac(ci[0]), frac(ci[1])
         ci_inside = ci_a >= -1e-9 and ci_b <= 1 + 1e-9
     ci_ok = (ci is not None and ci_inside and not dead and mode_mc and ci_b > ci_a
-             and not discrete)
+             and not discrete and not _never_drawn(ekey))
 
     h = ['<div class="mrail"><div class="mtrack"></div>']
     if discrete:
@@ -268,9 +299,8 @@ def _mini_rail(pkey, i, rw, env, ekey, wkey, lo, hi, mode_mc, css, opts=None):
             h.append(f'<span class="mopt" style="left:{_mx(_f01(frac(v)))}"></span>'
                      f'<span class="moptl" style="left:{_mx(_f01(frac(v)))}">{_fmt3(v)}</span>')
     else:
-        clo, chi = _active_span(ekey)
-        h.append(f'<div class="mcrop" style="left:{_mx(_f01(frac(clo)))};'
-                 f'width:{_mw(_f01(frac(chi)) - _f01(frac(clo)))}"></div>')
+        # D-134: no active-span band here. The rail carries the ENVELOPE and this row's own
+        # reading; the chosen sampling span is the variable's, and the variable's dial shows it.
         h.append(f'<span class="mends l">{_fmt3(e_lo)}</span>')
         h.append(f'<span class="mends r">{_fmt3(e_hi)}</span>')
     if not discrete and ci is not None and ci_b > ci_a:
@@ -351,8 +381,9 @@ def _adopted_by(rows, wkey, ekey):
 
 def _source_cards(key, merged, tkey, pinned, mode_mc):
     """Per-source rows, each carrying the D-089 mini rail: the source's point is a dot that
-    adopts the SPOT, its interval is a bracket that adopts the MC CROP, and the parameter's
-    current crop rides behind them as a band. The panel stays open through either click."""
+    adopts the SPOT and its interval is a bracket that adopts the MC CROP. The panel stays open
+    through either click. (D-134 took the parameter's own chosen span off these rails — it is the
+    variable's, not the row's, and the sidebar dial's trim lane shows it once.)"""
     rows = m.CAL_SOURCES.get("delta_total" if merged else key, [])
     if not rows:
         return
@@ -367,16 +398,19 @@ def _source_cards(key, merged, tkey, pinned, mode_mc):
     ekey = tkey if tkey else (key if _base_rng(key) is not None else None)
     erng = _base_rng(ekey) if ekey else None
     # A `choice` dimension gets a DISCRETE rail (Pavel, 2026-07-29, reversing 650bdba). History,
-    # because the reversal only makes sense against it: PARAM_RANGES['eta'] is
+    # because the reversal only makes sense against it: PARAM_RANGES['eta'] was
     # ('choice', [1.0, 0.61, 0.0, -2.0]) and `_tbounds_of` was handed that LIST as an endpoint, so
     # one click on the η » raised TypeError and took the page down. 650bdba closed the crash by
     # suppressing the rail for choice dimensions, on the argument that a menu has no range to
     # place a source on. Pavel overruled that — "I don't see a problem with clicking on descrete
     # point on a line. There won't be interval, MC uses spot value for this parameter" — and he is
     # right that the argument proves too much: the options ARE ordered points, so a source lands
-    # among them, which is exactly what a reader wants to see. `_tbounds_of` now has the choice
-    # branch (min..max option) and the rail draws the option stops instead of a crop band; η's two
-    # rows carry NUMBERS now, with `adopt` holding the selectbox label a click writes.
+    # among them, which is exactly what a reader wants to see.
+    #
+    # D-125 made η CONTINUOUS, so no shipped dimension is a `choice` and this branch is DORMANT —
+    # `opts` is None for every menu today. The substance of Pavel's instruction survives on the
+    # ORDINARY rail: η's rows still place dots on a line, and they no longer need the `adopt`
+    # label, because the destination is a slider that takes the number itself.
     opts = sorted(float(v) for v in erng[1]) if erng is not None and erng[0] == "choice" else None
     env = _tbounds_of(erng) if erng is not None else None
     rail_ok = env is not None and not pinned
@@ -386,8 +420,23 @@ def _source_cards(key, merged, tkey, pinned, mode_mc):
     # DISCRETE dial has dots and no brackets by construction (it is never sampled, so there is no
     # crop to adopt), and a menu with no rail at all (a parameter pinned at this level) has
     # neither — it must not instruct the reader to click something that is not on screen
-    any_range = mode_mc and rail_ok and not discrete and any(
-        "ci" in rw and not rw.get("display_only") for rw in rows)
+    # ---- D-128 TWO TIERS. The primary tier is D-109's 3-5 most defendable rows; the hidden tier
+    # (bounds, counter-readings, less popular constructions, historically ratified values) renders
+    # only after the reader opens the toggle at the foot of the menu. Rows keep their MENU index
+    # through the split — `i` keys every widget on the row, so a tier walk that renumbered them
+    # would re-key the buttons and drop their adoption state on a toggle.
+    #
+    # Hidden rows are a contiguous tail by construction (see cal_sources' rule block), so
+    # rendering primary-then-hidden preserves list order in both tiers.
+    primary = [(i, rw) for i, rw in enumerate(rows) if rw.get("tier") != "hidden"]
+    hidden = [(i, rw) for i, rw in enumerate(rows) if rw.get("tier") == "hidden"]
+    more_key = f"calmore_{key}"
+    # read before the widget is instantiated, so the header below describes the affordances the
+    # rows ACTUALLY on screen carry rather than the ones the whole table could carry
+    show_hidden = bool(st.session_state.get(more_key, False))
+    shown = primary + (hidden if show_hidden else [])
+    any_range = mode_mc and rail_ok and not discrete and not _never_drawn(ekey) and any(
+        "ci" in rw and not rw.get("display_only") for _, rw in shown)
     dial = f"*{TSPEC[tkey][0].split(' (')[0]}* slider" if tkey else "dial"
     if rail_ok:
         st.markdown("**Sources** — each row places itself on the "
@@ -420,54 +469,76 @@ def _source_cards(key, merged, tkey, pinned, mode_mc):
     if any(rw.get("basis") for rw in rows):
         st.caption(_BASIS_DISCLOSURE)
     css = [_RAIL_CSS] if rail_ok else []
-    last_group = None
-    for i, rw in enumerate(rows):
-        # D-076: rows are GROUPED, because a menu that mixes objects teaches the wrong thing.
-        # The subheading names what each block measures ("capability frontier" vs "largest run",
-        # "lower bound — pretraining only" vs "upper bound — test-time included", …).
-        grp = rw.get("group")
-        if grp and grp != last_group:
-            st.markdown(f"<div style='margin:0.6rem 0 0.2rem;font-size:0.78rem;"
-                        f"letter-spacing:0.02em;text-transform:uppercase;opacity:0.65;'>"
-                        f"{grp}</div>", unsafe_allow_html=True)
-            last_group = grp
-        with st.container(border=True, key=f"srow_{key}_{i}"):
-            # `disp` overrides the rendered figure where the row's machine value is an exact
-            # fraction (the coverage menu's 160/3) that must not be shown at full precision
-            shown = rw.get("disp") or f"{rw['value']} {rw['unit']}"
-            st.markdown(f"{rw['source']}{_basis_chip(rw)}{_grade_chip(rw)}  \n**{shown}**"
-                        + (f" &nbsp; :gray[{rw['note']}]" if rw["note"] else ""),
-                        unsafe_allow_html=True)
-            # THE RAIL (D-089), between the row's head and its prose — every row that has an
-            # envelope to sit on gets one, adoptable or not: placing a display-only reading on
-            # the same line as the adoptable ones is what answers "why can't I take this?"
-            # spatially, which is the argument that won variant 3.
-            if rail_ok:
-                with st.container(key=f"srail_{key}_{i}"):
-                    _mini_rail(key, i, rw, env, ekey, wkey, lo, hi, mode_mc, css,
-                               opts=opts)
-            if rw.get("display_only"):
-                # a different object, a bound, or a retired reading: shown for context, never
-                # clickable, and excluded from the default sampling span (source_span skips it).
-                # `why` states THIS row's own reason where the generic sentence would mislead —
-                # the coverage menu's rows are the same quantity, just outside the envelope.
-                st.caption("— " + (rw.get("why")
-                                   or "context only: not a competing estimate of this quantity."))
-                continue
-            # (the `triple` branch went with the money menus, D-093: no row carries the field
-            # any more, and a guard against an impossible case reads as if one might.)
-            if pinned:
-                # D-106 removed the ONE special case here — g_p's "fixed at this level: a
-                # measured leg, not a dial". It now has a Level-1 row and an un-pinned card, so
-                # that sentence would be false wherever it could still render. No card in
-                # `subsection_param_entries` is pinned today; the generic line is kept for the
-                # next one rather than deleted, because the pinned path is a property of the
-                # table, not of any particular parameter.
-                st.caption("— pinned at this level; the spot value is fixed.")
-                continue
-            if rw.get("ci") is not None and not mode_mc:
-                st.caption("— its interval is drawn under the rail; switch to **Monte Carlo** "
-                           "to adopt it as the sampling range.")
+
+    def _tier_cards(items):
+        """Render one tier. `items` is (MENU index, row) pairs — the menu index, never the
+        position within the tier, because it keys the row's container, rail and buttons.
+
+        Group headings restart per tier (D-128): the hidden tier opens below a toggle, so its
+        first group must print its own heading even when the primary tier ended on the same one.
+        """
+        last_group = None
+        for i, rw in items:
+            # D-076: rows are GROUPED, because a menu that mixes objects teaches the wrong thing.
+            # The subheading names what each block measures ("capability frontier" vs "largest
+            # run", "lower bound — pretraining only" vs "upper bound — test-time included", …).
+            grp = rw.get("group")
+            if grp and grp != last_group:
+                st.markdown(f"<div style='margin:0.6rem 0 0.2rem;font-size:0.78rem;"
+                            f"letter-spacing:0.02em;text-transform:uppercase;opacity:0.65;'>"
+                            f"{grp}</div>", unsafe_allow_html=True)
+                last_group = grp
+            with st.container(border=True, key=f"srow_{key}_{i}"):
+                # `disp` overrides the rendered figure where the row's machine value is an exact
+                # fraction (the coverage menu's 160/3) that must not be shown at full precision
+                head = rw.get("disp") or f"{rw['value']} {rw['unit']}"
+                st.markdown(f"{rw['source']}{_basis_chip(rw)}{_grade_chip(rw)}  \n**{head}**"
+                            + (f" &nbsp; :gray[{rw['note']}]" if rw["note"] else ""),
+                            unsafe_allow_html=True)
+                # THE RAIL (D-089), between the row's head and its prose — every row that has an
+                # envelope to sit on gets one, adoptable or not: placing a display-only reading on
+                # the same line as the adoptable ones is what answers "why can't I take this?"
+                # spatially, which is the argument that won variant 3.
+                if rail_ok:
+                    with st.container(key=f"srail_{key}_{i}"):
+                        _mini_rail(key, i, rw, env, ekey, wkey, lo, hi, mode_mc, css,
+                                   opts=opts)
+                if rw.get("display_only"):
+                    # a different object, a bound, or a retired reading: shown for context, never
+                    # clickable, and excluded from the default sampling span (source_span skips
+                    # it). `why` states THIS row's own reason where the generic sentence would
+                    # mislead — the coverage menu's rows are the same quantity, just outside the
+                    # envelope.
+                    st.caption("— " + (rw.get("why") or "context only: not a competing estimate "
+                                       "of this quantity."))
+                    continue
+                # (the `triple` branch went with the money menus, D-093: no row carries the field
+                # any more, and a guard against an impossible case reads as if one might.)
+                if pinned:
+                    # D-106 removed the ONE special case here — g_p's "fixed at this level: a
+                    # measured leg, not a dial". It now has a Level-1 row and an un-pinned card,
+                    # so that sentence would be false wherever it could still render. No card in
+                    # `subsection_param_entries` is pinned today; the generic line is kept for the
+                    # next one rather than deleted, because the pinned path is a property of the
+                    # table, not of any particular parameter.
+                    st.caption("— pinned at this level; the spot value is fixed.")
+                    continue
+                if rw.get("ci") is not None and not mode_mc:
+                    st.caption("— its interval is drawn under the rail; switch to **Monte Carlo** "
+                               "to adopt it as the sampling range.")
+
+    _tier_cards(primary)
+    if hidden:
+        # THE TOGGLE, at the foot of the primary tier and nowhere else (D-128). It is rendered
+        # only for menus that HAVE a second tier — a control that reveals nothing is worse than
+        # no control — and the hidden rows follow it in place, so "show more options" reads as
+        # the menu continuing rather than as a separate panel.
+        st.toggle(f"show more options ({len(hidden)})", key=more_key,
+                  help="Bounds, counter-readings and less popular constructions. They are part "
+                       "of this dial's range — the envelope spans every choosable row here too — "
+                       "but the menu leads with the readings that are easiest to defend.")
+        if show_hidden:
+            _tier_cards(hidden)
     if css:
         st.markdown("<style>" + "".join(css) + "</style>", unsafe_allow_html=True)
 
@@ -531,16 +602,22 @@ def render(d, p):
 
         def _sim_desc(ek):
             base = _base_rng(ek)
-            if base is not None and base[0] == "choice":
-                # a choice dimension has no range to widen: the MC pins it at the spot, which is
-                # Pavel's own ruling for eta ("MC uses spot value for this parameter")
-                return "the chosen option — a menu, so the draws pin it at the spot"
+            if base is not None and _never_drawn(ek):
+                # the app's sampler consumes `level_sample_keys`, so a dimension outside it is
+                # pinned however its tick is set. eta is the one such dial, by Pavel's own ruling
+                # ("There won't be interval, MC uses spot value for this parameter") -- so the
+                # caption says pinned rather than inviting a widening that would do nothing.
+                return "the spot value — this dimension is pinned, never drawn"
             arng, _ = _active_rng(ek)
+            # The two operations are ORDERED: the trim lane renders disabled while the tick is
+            # off (_trim_lane's `active=smp`), so "widen it" cannot be performed first. _MC_HELP
+            # states the same order; this caption used to state the reverse.
             return (_fmt_range(arng) if arng is not None
-                    else "point — not sampled by default (widen the range to sample it)")
+                    else "point — not sampled by default (tick **sample in MC**, then widen "
+                         "the crop)")
 
         if merged:
-            st.caption("grade **C** · MC samples the *Follower lag* target: "
+            st.caption("grade **C** · MC samples the *Fringe lag* target: "
                        + _sim_desc("t_lag_mo") + " months · envelope "
                        + _fmt_range(m.TARGET_RANGES["t_lag_mo"]))
         elif tkey:

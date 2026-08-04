@@ -64,31 +64,35 @@ class ParamMeta:
 
 PARAMS: dict[str, ParamMeta] = {
     'gamma': ParamMeta(interp='**$\\gamma$ — how fast the AI-R&D speedup grows, per OOM.** The GROWTH rate of the **recursive self-improvement** (RSI) feedback — $\\beta_0$ is how much faster AI makes AI R&D *today*, $\\gamma$ is how fast that advantage compounds as capability rises: each OOM of capability multiplies AI-R&D speed by $10^{\\gamma x}$ — so $\\gamma$ is **decades of R&D speed per OOM of capability**, the same units as every other slope in the model (base 10 throughout). $\\gamma = 0$ disables it entirely (freeze). $\\gamma \\gtrsim 0.182$ goes super-exponential — finite-time blow-up inside the 10-yr horizon. Default 0.087, tentative (grade C). *(Both numbers were stated in nats under an earlier unit convention, where the same thresholds read 0.42 and 0.2 — an older note quoting those is not describing a different model.)*', math_label='\\gamma', uni_label='γ', short_name='RSI growth (how fast the speedup compounds)', cal_target='how strongly AI-for-AI-R&D compounds (no observable yet)', grade='C'),
-    'x_mid': ParamMeta(interp='**$x_{mid}$ — value-slope transition midpoint, OOM above the 2026 frontier.** Not a half-saturation point: the value slope $w\'(x)$ rides the universal transition curve from $\\nu$ down to the floor $\\nu_\\infty$, and $x_{mid}$ is where that transition is HALF-DONE ($q^w_0$% of it at today\'s frontier, $(100-q^w_0)$% at $2x_{mid}$). Reference values: **2** = commoditization bites early; **5** = mid; **10** = today\'s slope carries across the horizon. Envelope [2, 20] kept provisionally from the old bend — flagged for the calibration round. Pivotal knob (grade C).', math_label='x_{mid}', uni_label='x_mid', short_name='value-slope transition midpoint', cal_target="the value-slope transition is half-done ~10 OOM above today's frontier", cal_alt='**Refs:** 2 = commoditization bites early · 5 = mid · 10 = today\'s slope carries to the horizon. Envelope re-examination flagged → calibration round.', grade='C'),
-    # D-083: the ASYMPTOTIC value slope — an app target (t_value_inf_x) like nu's t_value_x
-    'nu_inf': ParamMeta(interp='**$\\nu_\\infty$ — asymptotic value slope, value-OOMs per capability-OOM.** Where the value slope $w\'$ lands once the transition is done: far past $x_{mid}$, each further OOM of capability is worth $10^{\\nu_\\infty}$× more — the hard ceiling $\\bar W$ is retired, value grows without bound at this floor slope. Default **log10(1.25)** ≈ 0.097 (×1.25/OOM, vs the ×2.1 pre-transition slope) — a PLACEHOLDER: no documented sources yet, envelope [×1, ×2] proposed and flagged for the calibration round. $\\nu_\\infty = \\nu$ switches the transition off (the Level-1 pin). Grade F pending calibration.', math_label='\\nu_\\infty', uni_label='ν_inf', short_name='asymptotic value slope', cal_target='each OOM is worth ~×1.25 more once the transition is done (placeholder)', cal_alt='**Flagged:** envelope [×1, ×2] is a proposal — full commoditization (×1) to just-below-today (×2); no documented sources yet → calibration round.', grade='F'),
-    'delta_dev': ParamMeta(interp='**$\\delta_{dev}$ — developed-model diffusion, per yr.** Release-invariant (ambient) catch-up: the follower closes the *algorithmic* gap via talent, published methods and ambient know-how even with nothing released. Default 0.20; U[0.08, 0.40]/yr. Jointly calibrated with $\\delta_{rel}$ so the observed ~7-month lag is stationary (see $\\delta$); weakly identified (grade C).', math_label='\\delta_{dev}', uni_label='δ_dev', short_name='ambient diffusion', cal_target='keeps the ~7-mo lag constant — the ambient share of the wedge', grade='C'),
-    'delta_rel': ParamMeta(interp='**$\\delta_{rel}$ — released-model distillation, per yr.** Release-controlled channel: the follower distills from the model the leader serves — the developed frontier $x^L$ (the release-delay extension that would let the served model lag it is parked). This is the lever a release delay would act on. Default 0.26; U[0.12, 0.75]/yr; jointly calibrated with $\\delta_{dev}$ for lag stationarity (grade C). **$\\delta_{rel} = 0$ = distillation disabled** — released channel off; the follower catches up through $\\delta_{dev}$ only.', math_label='\\delta_{rel}', uni_label='δ_rel', short_name='distillation', cal_target='keeps the ~7-mo lag constant — the distillation share of the wedge', grade='C'),
-    'g_C_inf': ParamMeta(interp='**$g_{c\\infty}$ — compute-growth floor, OOM/yr.** Long-run compute growth once scaling hits limits (power ~2030). 0.13 OOM/yr ≈ 1.35×/yr (hardware-only). The floor *level* is our extrapolation (grade C); widget-critical for the slowdown scenario.', math_label='g_{c\\infty}', uni_label='g_c∞', short_name='compute-growth floor', cal_target='long-run compute grows only ~×1.35/yr (hardware-only)', cal_alt='**Note:** the hardware-only floor is our extrapolation, not measured.', grade='C'),
+    # D-132 (Pavel, 2026-08-03): spot 10 → 6, envelope [2, 20] → [2, 12], an evidenced menu, and
+    # the grade earns its way F → C. ⟪VAL_M_IMPLIED⟫ / ⟪VAL_M_COHERENT⟫ are the XM5 cross-check.
+    'x_mid': ParamMeta(interp='**$x_{mid}$ — value-slope transition midpoint, OOM above the 2026 frontier.** Not a half-saturation point: the value slope $w\'(x)$ rides the universal transition curve from $\\nu$ down to the floor $\\nu_\\infty$, and $x_{mid}$ is where that transition is HALF-DONE ($q^w_0$% of it at today\'s frontier, $(100-q^w_0)$% at $2x_{mid}$). It is a **pure scale on the capability axis** — the curve depends on $x$ and $x_{mid}$ only through $x/x_{mid}$ — so a source pins it only by giving a *location* and a *completion fraction* together. Most published statements are full-automation dates, i.e. ~99% complete, which this dial reads at **half** their face value. Default **6.0 OOM**: Epoch\'s GATE ramp read at *half of tasks automated*, and corroborated to 0.12 OOM by a chain sharing no input with it — the ruler-free level identity $x_{mid} = \\lambda(q^w_0)(1-q^w_0/100)/\\nu$. **This is the gate.** It is the only dial in the value block whose envelope contains a sign flip of the Level-2 verdict: below $x_{mid} \\approx 4.0$ the leader fails to cover its model-building bill *even granting the optimist his own 10 %/yr floor*. Grade C — earned, not asserted, and B is unreachable until somebody measures the total remaining addressable-value multiple, because no source fits a dollar-valued logistic in capability OOMs.', math_label='x_{mid}', uni_label='x_mid', short_name='value-slope transition midpoint', cal_target="half of tasks automated ~6 OOM above today's frontier (Epoch GATE)", cal_alt='**Coherence check (the value block\'s only one):** read as a bounded market, $(x_{mid}, q^w_0)$ over-determine the total value multiple $W(\\infty)/W(0)$. This pair implies **×⟪VAL_M_IMPLIED⟫** while $q^w_0$ itself asserts **×⟪VAL_M_ASSERTED⟫**; they agree exactly at $x_{mid}$ = ⟪VAL_M_COHERENT⟫.⟪VAL_M_WARN⟫ It binds only under that reading — with $\\nu_\\infty > 0$ there is no ceiling — so a large gap is a *warning*, not an error. The retired default (10.0) sat 18.5× out. **Read the pair, not the number:** $\\nu_\\infty$ bites only through this dial.', grade='C'),
+    # D-083: the ASYMPTOTIC value slope — an app target (t_value_growth_inf), like ν's
+    # t_value_growth. Calibrated by D-107, re-keyed to a growth rate by D-118, to ×/yr by D-133.
+    'nu_inf': ParamMeta(interp='**$\\nu_\\infty$ — asymptotic value slope, value-OOMs per capability-OOM.** Where the value slope $w\'$ lands once the transition is done: far past $x_{mid}$, each further OOM of capability is worth $10^{\\nu_\\infty}$× more — the hard ceiling $\\bar W$ is retired, value grows without bound at this floor slope. **You do not dial this number; you dial the growth rate it implies.** Long-run AI-attributable value growth is $\\nu_\\infty \\times \\dot x^L$, so the control is that rate in ×/yr and the slope is derived at the frontier speed the horizon actually reaches (0.409 OOM/yr at the defaults). Default **×1.10/yr** (10 %/yr) ⇒ $\\nu_\\infty \\approx 0.101$ (×1.26/OOM, against ≈×2.10 today): the floor of Amodei\'s own 10–20% forecast, granted deliberately — if the leader cannot cover its bill even on the most favourable published view of what capability is worth, the verdict does not rest on our pessimism. Envelope **[×1.00, ×1.30]/yr** — 0 to 30 %/yr — runs from stagnation to the explosive-growth threshold, and the » menu lets you pick a published worldview instead. $\\nu_\\infty = \\nu$ switches the transition off (the Level-1 pin). Grade C: nothing measures an asymptotic value elasticity, but the model\'s own identity turns it into a growth rate the macro literature bounds directly.', math_label='\\nu_\\infty', uni_label='ν_inf', short_name='asymptotic value slope', cal_target="long-run AI-attributable value grows ~10%/yr — the optimist's floor, granted", cal_alt='**Conditional, not pivotal:** $\\nu_\\infty$ bites only through $x_{mid}$. At the shipped midpoint the frontier never reaches the transition, so the whole envelope moves year-5 coverage by ~4 pp and flips no verdict; bring the midpoint within reach and the same sweep spans harvest to commoditization. Sweep the two together.', grade='C'),
+    'delta_dev': ParamMeta(interp='**$\\delta_{dev}$ — developed-model diffusion, per yr.** Release-invariant (ambient) catch-up: the follower closes the *algorithmic* gap via talent, published methods and ambient know-how even with nothing released. Default 0.20/yr, a point value — it is *derived* from the Fringe-lag dial, never sampled on its own. Jointly calibrated with $\\delta_{rel}$ so the observed ~7-month lag is stationary (see $\\delta$); weakly identified (grade C).', math_label='\\delta_{dev}', uni_label='δ_dev', short_name='ambient diffusion', cal_target='keeps the ~7-mo lag constant — the ambient share of the wedge', grade='C'),
+    'delta_rel': ParamMeta(interp='**$\\delta_{rel}$ — released-model distillation, per yr.** Release-controlled channel: the follower distills from the model the leader serves — the developed frontier $x^L$ (the release-delay extension that would let the served model lag it is parked). This is the lever a release delay would act on. Default 0.26/yr, a point value — it is *derived* from the Fringe-lag dial, never sampled on its own; jointly calibrated with $\\delta_{dev}$ for lag stationarity (grade C). **$\\delta_{rel} = 0$ = distillation disabled** — released channel off; the follower catches up through $\\delta_{dev}$ only.', math_label='\\delta_{rel}', uni_label='δ_rel', short_name='distillation', cal_target='keeps the ~7-mo lag constant — the distillation share of the wedge', grade='C'),
+    'g_C_inf': ParamMeta(interp='**$g_{c\\infty}$ — compute-growth floor, OOM/yr.** Long-run compute growth once scaling hits limits (power ~2030). 0.15 OOM/yr ≈ 1.41×/yr, and it is a SUM OF TWO LEGS in these units: hardware price-performance (0.14 ≈ ×1.38/yr, the same price of compute $g_p$ the cost side uses) plus the real growth of the training budget (0.01 ≈ +2.3 %/yr, long-run economic growth). That decomposition is an identity here rather than an analogy — compute bought = dollars spent × FLOP per dollar, and the model carries exactly one price series — so this dial has an exact read-out: implied long-run budget growth $10^{g_{c\\infty}-g_p}$ = **×⟪FLOOR_BILL_X⟫/yr**. Read it: below ×1.00 the leader\'s real budget is shrinking forever, above it the budget outgrows the economy. The floor *level* is still an extrapolation (grade C) — no series measures post-2030 frontier compute growth — and it is widget-critical for the slowdown scenario.', math_label='g_{c\\infty}', uni_label='g_c∞', short_name='compute-growth floor', cal_target='long-run compute grows ~×1.41/yr — hardware ×1.38 × budget +2.3%/yr', cal_alt='**Read the pair, not the number:** every setting of this dial names an implied long-run budget growth. The alternative readings are the flat-budget world (×1.38/yr, hardware alone) and the AI-boosted one (×1.52/yr, budget at 10%/yr). **Note:** the floor *level* is an extrapolation past 2030, not a measurement.', grade='C'),
     'tau': ParamMeta(interp='**$\\tau$ — release / withholding delay, months.** PARKED. Policy lever: $x^R_t = x^L_{t-\\tau}$, the leader serves the model it had $\\tau$ ago. $\\tau = 0$ = release immediately (baseline). Capped at the 3-month policy-relevant range. Grade F by design (a decision variable, not calibrated).', uni_label='τ', short_name='release delay', cal_target='the policy lever itself — chosen, not calibrated'),
-    'g_C0': ParamMeta(interp='**$g_c$ — compute growth at the CAPABILITY frontier, OOM/yr.** 0.511 = log10(3.24), i.e. **3.24×/yr**. This is the growth of the training compute behind the *most capable* model — not of the largest training run (Epoch’s 4.2×/yr series), which is a different object: the two diverged in 2023–25 as labs shifted spend into post-training and inference. Two independent routes meet at the spot: the dollar identity 2.4 (bill growth) × 1.35 (hardware price-performance), and Epoch’s capability-frontier reading of 3–4×/yr. This dial means **today** at every level: the transition curve\'s upper plateau $g_c^{pre}$ is *derived* inside $\\Gamma$, so moving the position dial $q^c_0$, the midtime or the floor changes where the slowdown started, never what the rate is now. Grade A.', math_label='g_c', uni_label='g_c', short_name='compute growth today', cal_target='the compute behind the most capable model grows ~×3.24/yr', cal_alt='**Different object:** the compute-frontier series (largest run) reads 4.2–5.3×/yr — kept in the menu, labelled, but it is not what $x^L$ tracks.', grade='A'),
+    'g_C0': ParamMeta(interp='**$g_c$ — compute growth at the CAPABILITY frontier, OOM/yr.** 0.511 = log10(3.24), i.e. **3.24×/yr**. This is the growth of the training compute behind the *most capable* model — not of the largest training run (Epoch’s 4.2×/yr series), which is a different object: the two diverged in 2023–25 as labs shifted spend into post-training and inference. Two independent routes meet at the spot: the dollar identity 2.4 (bill growth) × 1.35 (the *cluster-midpoint* hardware reading, not the measured price leg $g_p$ = 1.38 the cost side runs on), and Epoch’s capability-frontier reading of 3–4×/yr. This dial means **today** at every level: the transition curve\'s upper plateau $g_c^{pre}$ is *derived* inside $\\Gamma$, so moving the position dial $q^c_0$, the midtime or the floor changes where the slowdown started, never what the rate is now. Grade A.', math_label='g_c', uni_label='g_c', short_name='compute growth today', cal_target='the compute behind the most capable model grows ~×3.24/yr', cal_alt='**Different object:** the compute-frontier series (largest run) reads 4.2–5.3×/yr — kept in the menu, labelled, but it is not what $x^L$ tracks.', grade='A'),
     't_mid': ParamMeta(interp='**$t_{mid}$ — slowdown midpoint, yr.** The compute-growth path is the universal transition curve $g_c(t) = \\Gamma(t;\\, g_c,\\, g_{c\\infty},\\, t_{mid},\\, q^c_0)$: half the slowdown has played out by $t_{mid}$ — $q^c_0$% of it today and $(100-q^c_0)$% by $2t_{mid}$, so the transition occupies roughly the window $[0, 2t_{mid}]$. Replaces the retired decay rate $\\xi$ (default 2.3 yr ≈ the old $\\xi = 0.3$ half-decay time $\\ln 2/0.3$). Pure scenario knob (grade F) — sweep it.', math_label='t_{mid}', uni_label='t_mid', short_name='slowdown midpoint', cal_target='when the compute slowdown is half-done (scenario dial)', grade='F'),
     'g_a': ParamMeta(interp='**$g_a$ — algorithmic progress, OOM/yr — a RESIDUAL, not an estimate.** 0.544 = log10(3.5), i.e. 3.5×/yr. The *observable* is *effective*-compute growth — **11.34×/yr**, everything that is not physical FLOP: architecture, data, and post-training know-how — and $g_a = g_{eff} - g_c$. Defining it this way makes the RL-compute double-count structurally impossible: whatever counts as compute is by construction not counted again as algorithms. Identity: $11.34 = 3.24 \\times 3.50$. Reference-dependent (the same model sequence shows 63%/yr against an LSTM reference and 0%/yr against a dense-Transformer one) — the reference here is 2026 frontier practice at frontier scale. Grade B.', math_label='g_a', uni_label='g_a', short_name='algo progress (residual)', cal_target='effective compute grows ×11.3/yr, of which ×3.24 is physical compute', cal_alt='**Bounds:** pretraining-only measurements (2.2–3.2×/yr) are *lower* bounds — they exclude post-training know-how, which this model puts in $a$. Index-derived readings (5.9–9×/yr) are *upper* bounds — they include capability bought at inference time, which is in neither $a$ nor $c$.', grade='B'),
-    'alpha': ParamMeta(interp='**$\\alpha$ — experiment-compute weight in the CES research bracket.** Share of algorithmic progress carried by experiment-compute growth rather than by AI-assisted researchers. Calibrated at **0.70**, range [0.45, 0.90], dialled through the observable "% of progress lost if compute growth halves" — $\\alpha/2$ at the base $\\eta = 1$. Inert at Level 1. The **delivered** weight moves with $\\eta$: the shipped 35% drag implies $\\alpha = 0.70$ at $\\eta = 1$, $0.67$ at $0.61$, $0.62$ at $0$ and $0.46$ at $-2$, which is what counts the bottleneck evidence once rather than twice.', math_label='\\alpha', uni_label='α', short_name='experiment-compute weight', cal_target='% of algo progress lost if experiment-compute growth halved', grade='C'),
-    'eta': ParamMeta(interp='**$\\eta$ — CES exponent for compute–labor substitution in research.** $\\eta = 1$ weighted avg; $\\eta \\to 0$ Cobb-Douglas; $\\eta < 0$ complements. From Whitfill & Wu 2025 ($\\sigma = 2.58$ substitutes / ≈ 0 complements — sign flips on controls, grade B). *(The $\\eta \\to -\\infty$ Leontief limit is no longer offered as a scenario. It is still in the model, where $\\alpha$ is provably unread.)*', math_label='\\eta', uni_label='η', short_name='research elasticity', cal_target='how substitutable compute and researchers are in R&D', grade='B'),
+    'alpha': ParamMeta(interp='**$\\alpha$ — experiment-compute weight in the CES research bracket.** Share of algorithmic progress carried by experiment-compute growth rather than by AI-assisted researchers. Calibrated at **0.70**, range [0.45, 0.90], dialled through the observable "% of progress lost if compute growth halves" — $1 - 2^{-\\alpha}$ at the base $\\eta = 0$, so **38.44% ⇒ 0.70**. Inert at Level 1. The **delivered** weight moves with $\\eta$: the shipped 38.44% drag implies $\\alpha = 0.70$ at $\\eta = 0$, $0.74$ at $0.61$, $0.77$ at $1$ and $0.61$ at $-1.2$, which is what counts the bottleneck evidence once rather than twice. The menu\'s rows are each read at their OWN construct\'s $\\eta$: a compute cost SHARE is a Cobb-Douglas object (under CD the output elasticity equals the cost share), while the growth reading is natively an $\\eta = 1$ one.', math_label='\\alpha', uni_label='α', short_name='experiment-compute weight', cal_target='% of algo progress lost if experiment-compute growth halved', grade='C'),
+    'eta': ParamMeta(interp='**$\\eta$ — CES exponent for compute–labor substitution in research.** A continuous dial over **[−1.20, +1.00]**, read through $\\sigma = 1/(1-\\eta)$: **$\\eta = 0$ is the base** — Cobb-Douglas, $\\sigma = 1$, the recursive-self-improvement literature\'s own convention (Davidson et al. 2026) and the only setting at which $\\alpha$ is identified by the compute cost share; $\\eta = 0.61$ is Whitfill & Wu 2025\'s estimated $\\sigma = 2.58$ (grade B, the menu\'s one measurement); $\\eta < 0$ makes the two inputs complements, so the scarcer one rules. $\\eta = 1$ — perfect substitution, a weighted average — was the default until it was superseded: a tractability convention with no literature behind it, and it is the CES family\'s mathematical ceiling, since $\\sigma$ is negative above it. *(The left end stops at −1.20, the most complementary value any cited publication states as a number. Neither the $\\eta = -2$ stand-in nor the $\\eta \\to -\\infty$ Leontief limit is offered: the complements spec behind them estimates $\\sigma = -0.10$ (SE 0.176), i.e. no finite negative $\\eta$ at all. Leontief is still in the model, where $\\alpha$ is provably unread.)*', math_label='\\eta', uni_label='η', short_name='research elasticity', cal_target='how substitutable compute and researchers are in R&D', grade='B'),
     # D-084: RENAMED rho0 -> beta0. rho was doing double duty — the coverage ratio rho_t and
     # its t = 0 dial rho_0 = m/k (D-080) — and coverage keeps the letter (it is the reported
     # outcome, and c/C are compute while k and m are taken), so the RSI feedback scale moves.
-    'beta0': ParamMeta(interp='**$\\beta_0$ — AI-R&D speedup today.** $\\psi(0) = 1 + \\beta_0$ is the current AI-assistance multiplier on research throughput. 0.3 tentative (grade C). *(Renamed from $\\rho_0$: $\\rho$ is the coverage ratio $E_t/B_t$ — the reported outcome — and one letter cannot be both.)*', math_label='\\beta_0', uni_label='β₀', short_name='AI R&D speedup today', cal_target='AI makes AI R&D ~30% faster today', grade='C'),
+    # D-132 (Pavel, 2026-08-03, B1): the INPUT reading is ruled, and `cal_target` / `short_name`
+    # move with it — they carried the OUTPUT reading while `interp` and the code carried the
+    # input one, and at the retired η = 1 the two differed by 10× on the same card.
+    'beta0': ParamMeta(interp='**$\\beta_0$ — today\'s AI-assistance level in AI R&D.** $\\psi(0) = 1 + \\beta_0$ is the counterfactual multiplier on frontier-lab research **throughput**: $\\sigma_0 = \\beta_0/(1+\\beta_0)$ is the share of today\'s throughput that AI assistance is responsible for — what would be lost if assistance were withdrawn with the human workforce held fixed. It is an **input level, not an output speedup**, and that is the ruled construct: a with-versus-without trial reads it off with no conversion, while an output speedup has to be inverted through the CES and so moves whenever $\\alpha$ or $\\eta$ moves. **$\\beta_0$ never changes today\'s rate** — $\\psi$ is normalised by $\\psi(0)$, so $\\dot a^L_0 = g_a$ bitwise at every $\\beta_0$; what it fixes is the *shape* of the assistance path. The object is **headroom, not speed**. 0.3 is an explicit **placeholder**, not a calibration — held rather than moved because the construct was ambiguous and the conversion changed underneath it. Envelope **[0.04, 3.00]**, both ends witnessed. Grade **F**, and it stays F even with the menu: the evidence is plentiful and none of it measures this object — every grade-A study is general developers on coding tasks, every frontier-lab reading is self-report or code-volume telemetry, and the two disagree by 15× on roughly the same population months apart. *(Renamed from $\\rho_0$: $\\rho$ is the coverage ratio $E_t/B_t$ — the reported outcome — and one letter cannot be both.)*', math_label='\\beta_0', uni_label='β₀', short_name='AI-assistance level in AI R&D today', cal_target='AI assistance supplies ~23% of frontier-lab research throughput today (placeholder)', cal_alt='**Only identified jointly with $\\gamma$.** Over ten years the model sees the scalar $R_\\psi(X)$, so a 75× move in $\\beta_0$ changes the answer by ~9% if $\\gamma$ moves with it and flips the Level-3 profit sign if $\\gamma$ is held fixed. A ruling here at fixed $\\gamma$ is a ruling about the strength of the $\\psi$ engine, not about today\'s assistance level — and $\\gamma$ has no adoptable source row at all, so the pair cannot be closed yet.', grade='F'),
     'Delta0': ParamMeta(interp='**$\\Delta_0$ — initial capability gap, OOM.** 0.615 OOM = the **7.0-month** fringe lag × the leader’s current speed. Months are the master: the *lag* is the observable and $\\Delta_0$ is derived from it, so moving the compute or effective-compute dial changes what the same lag is worth in OOMs. The 7.0 reading is on a **strict** catch-up rule and an agentic / long-horizon basis (UK AISI autonomous ranges; Epoch’s ECI on the strict rule reads 6.0). Grade A/B.', math_label='\\Delta_0', uni_label='Δ₀', short_name='initial gap', cal_target='the competitive fringe is ~7 months behind the frontier today', cal_alt='**Rule artefact:** public leaderboard headlines (~4 mo) use a *lenient* catch-up rule; the same data on the strict rule gives 6. Benchmark lags are also *lower bounds* (benchmaxxing).', grade='A/B'),
     'split': ParamMeta(interp='**split — algo share of $\\Delta_0$.** How much of the initial gap is algorithmic vs compute. 0.5 placeholder (grade F, open question).', math_label='\\text{split}', uni_label='split', short_name='algo share of the gap', cal_target='about half the initial gap is algorithmic, half compute', grade='F'),
     'g_a_F': ParamMeta(interp='**$g_a^F$ — follower algo progress, as a SHARE of the leader\'s $g_a$.** The dial is the follower/leader ratio itself: progress is scale-biased (the frontier improves faster than small scale — Gundlach; ratio ≈ 0.6–0.8, central 0.7), so $g_a^F = \\text{share} \\cdot g_a$ ≈ 0.38 OOM/yr at the defaults — and it TRACKS the effective-compute dial instead of silently detaching from it. The MC prior draws the same share band. Grade B.', math_label='g_a^F', uni_label='g_a,F', short_name='follower algo share', cal_target="follower algo progress ≈ 70% of the leader's", grade='B'),
     'g_CF0': ParamMeta(interp='**$g_c^F$ — fringe compute growth TODAY, OOM/yr** ($g^F_c(0)$, not a pre-slowdown plateau)**.** SCENARIO KNOB, grade F: no calibration yet — the 0.5 default is a placeholder, not a source statistic, and it (with the floor and midpoint) drives the Level-3 lag drift, so treat the level\'s forward path as a scenario until the follower-compute calibration pass (projected Chinese/fringe build-out) lands.', math_label='g_c^F', uni_label='g_cᶠ', short_name='follower compute growth', cal_target='scenario dial — follower-compute calibration pass to come', grade='F'),
     'g_CF_inf': ParamMeta(interp='**$g_{c\\infty}^F$ — follower compute-growth floor, OOM/yr.** SCENARIO KNOB, grade F (Q-5 ruling, extensions-sync round): the 0.10 default is a placeholder, not a source statistic — same standing as $g_c^F$; calibration pass to come.', math_label='g_{c\\infty}^F', uni_label='g_c∞ᶠ', short_name='follower compute floor', cal_target='scenario dial — follower-compute calibration pass to come', grade='F'),
     't_mid_F': ParamMeta(interp='**$t_{mid}^F$ — follower slowdown midpoint, yr.** The follower compute path rides the same universal transition curve as the leader: $g^F_c(t) = \\Gamma(t;\\, g^F_c,\\, g^F_{c\\infty},\\, t_{mid}^F,\\, q^F_0)$, half-done at $t_{mid}^F$ and $q^F_0$% along today. SCENARIO KNOB, grade F (Q-5 ruling) — like the leader\'s $t_{mid}$, chosen not calibrated.', math_label='t_{mid}^F', uni_label='t_mid_F', short_name='follower slowdown midpoint', cal_target="when the follower's slowdown is half-done (scenario dial)", grade='F'),
-    'nu': ParamMeta(interp='**$\\nu$ — value curvature TODAY, value-OOMs per capability-OOM.** 0.322 = log10(2.1): each order of magnitude of capability commands **×2.1** more value at today\'s frontier. Literally $w\'(0)$, at every $q^w_0$ — under an earlier convention it was the *pre-easing* slope, so dialling 2.1 delivered 2.089 today. Pooled median of three independent constructions — Davidson’s value datum (1.86), a GATE-style automation ramp against the wage bill (2.30), and the revenue decomposition at this calibration’s frontier speed (2.24) — with a 90% band [1.7, 2.65]. **The most consequential number in the model:** the whole profitability race is $\\nu\\,\\dot x^L_t$ against $g_c - g_p$, and the break-even pivot sits at ≈1.64×/OOM. Single-benchmark slopes (SWE-bench 10.7, RLI 16) are *not* this number — a dollar-weighted mixture of channels with midpoints spread over ±2–3 OOM aggregates to ~2×/OOM even when individual channels ramp at 16×. Grade B.', math_label='\\nu', uni_label='ν', short_name='value slope', cal_target='each OOM of capability is worth ~×2.1 more', grade='B'),
-    'phi_RD': ParamMeta(interp='**$\\phi_{RD}$ — R&D markup on compute.** RETIRED from the widget: under the observed-bill anchor the $(1+\\phi_{RD})$ factor cancels from the cost path at every $t$ — provably inert, so the dial and its level are gone (pinned 0 unconditionally). The observed bill already contains compute and R&D/researcher overhead together; a revival must re-spec it as the NON-deflating leg (wages don\'t fall at $g_p$). Grade C.', math_label='\\phi_{RD}', uni_label='φ_RD', short_name='R&D overhead (retired)', cal_target='folded into the observed bill — not separately calibrated', grade='C'),
-    'ell': ParamMeta(interp="**$\\ell$ — training lead time, yr.** How far ahead the next model's compute is bought: the firm pays at $t$ for the model shipping at $t+\\ell$. **0.45 yr** (90% CI [0.25, 1.3]) — a payment-weighted composite: run duration plus the finish→release gap, weighted by *when the dollars are actually paid*, which reasoning-era RL spending pulls later. **Absent from the base model**: with constant compute growth $c^L_{t+\\ell} - c^L_\\ell = g_c t$ identically, so under the observed-bill anchor $\\ell$ cancels from the entire cost path. It starts to bite only once the compute slowdown bends the curve — where it also gets its counterfactual reading (“what if models trained instantly?”). Grade B.", math_label='\\ell', uni_label='ℓ', short_name='training lead time', cal_target="the next model's compute is bought ~5.4 months ahead", cal_alt='**Note:** the level of today’s bill is *observed*, so moving $\\ell$ cannot move the 2026 cost. It used to re-anchor an internal constant to keep that true; now the cost path is referenced to $c^L_\\ell$ and normalised by today’s bill, so $B_0 = 1$ and $\\ell$ has nothing to re-anchor. What $\\ell$ changes is the cost path’s tilt once growth is no longer constant.', grade='B'),
+    'nu': ParamMeta(interp='**$\\nu$ — value curvature TODAY, value-OOMs per capability-OOM.** 0.323 = $\\log_{10}(2.19)/1.055$: each order of magnitude of capability commands **≈×2.10** more value at today\'s frontier. **You do not dial this number; you dial the growth rate it implies** — value grows at $\\nu\\,\\dot x^L$, so the control states that rate in ×/yr and the slope is derived at whatever frontier speed the other dials set. The calibrated anchor is the RATE, **×2.19/yr** (119%/yr) — a round number, deliberately; ×2.10/OOM is what it comes to at the calibrated speeds (an exact ×2.1/OOM would read 118.68%/yr, 0.14% away, and the evidence is nowhere near that sharp). Literally $w\'(0)$, at every $q^w_0$ — under an earlier convention it was the *pre-easing* slope, so dialling 2.1 delivered 2.089 today. The pooled central value across three independent constructions — Davidson’s value datum (1.86), a GATE-style automation ramp against the wage bill (2.30), and the revenue decomposition at this calibration’s frontier speed (2.24): an equally-weighted Monte Carlo over the three routes’ own input bands, $p50 = 2.08$/OOM, with a 90% band [1.7, 2.65]. *Not* the median of the three numbers quoted, which are each restated on this calibration’s ruler. **The most consequential number in the model:** the whole profitability race is $\\nu\\,\\dot x^L_t$ against $g_c - g_p$, and the break-even pivot sits at ≈⟪BE_VM⟫×/OOM. Single-benchmark slopes (SWE-bench 10.7, RLI 16) are *not* this number — a dollar-weighted mixture of channels with midpoints spread over ±2–3 OOM aggregates to ~2×/OOM even when individual channels ramp at 16×. Grade B.', math_label='\\nu', uni_label='ν', short_name='value slope', cal_target='each OOM of capability is worth ~×2.1 more', grade='B'),
     'g_p': ParamMeta(interp="**$g_p$ — effective compute-price decline, OOM/yr.** 0.14 = log₁₀(1.38): a dollar buys ~38% more training compute each year. This is now the **measured hardware price-performance leg** (Hobbhahn, Heim & Aydos 2023: 1.39×/yr, CI [1.27, 1.54]) taken as a trusted anchor — *not*, as before, a residual fitted so the bill matched. The consequence is a read-out, not a free parameter: implied bill growth $10^{g_c-g_p} = $ **2.35×/yr** against Cottier's observed 2.4×/yr — a 2% miss we document rather than fit away. Grade B.", math_label='g_p', uni_label='g_p', short_name='price decline', cal_target='training compute gets ~38% cheaper each year (measured hardware leg)', cal_alt='**Retired:** the old residual reading (1.75×/yr) reconciled a 4.2×/yr compute trend with the 2.4×/yr bill. With the capability-frontier definition of $g_c$ the three anchors are consistent to 2%, so the residual is no longer needed.', grade='B'),
     'r': ParamMeta(interp='**$r$ — discount rate, per yr.** Only used by the ownership user-cost extension (II.6); the widget reports **undiscounted** profit flows, not NPV, so $r$ is hidden unless II.6 is on. 0.08 (grade C).', math_label='r', uni_label='r', short_name='discount rate', cal_target='\\$1 next year ≈ \\$0.92 today', grade='C'),
     'T': ParamMeta(interp='**$T$ — horizon, yr.** The time window every graph uses. Switch between **5 yr** and **10 yr** with the toggle at the top of the sidebar; default 10 yr (the walkthrough horizon). The N5 harvest condition is asymptotic and reported analytically, not plotted beyond 10 yr.', uni_label='T', short_name='horizon'),
@@ -103,25 +107,30 @@ PARAMS: dict[str, ParamMeta] = {
     'cov0': ParamMeta(interp="**$\\rho$ — coverage at $t = 0$, percent.** Earnings ÷ "
                              "model-building cost today. $\\rho_t = E_t/B_t$ is the model's "
                              "REPORTED financial outcome, and $\\rho$ is the **only finance "
-                             "parameter there is**: both money legs are normalised at "
+                             "parameter there is**: both legs — earnings and "
+                             "model-building cost — are normalised at "
                              "$t = 0$, so $E_0 = \\rho$ and $B_0 = 1$ identically and the whole "
                              "block is in multiples of today's build bill. Break-even is "
                              "**100%**: $\\Pi_t > 0 \\iff \\rho_t > 1$. It is CALIBRATED from "
                              "reported dollars as $m/k$ — margin before model-building over "
                              "model-building share of revenue — which is why the source menu "
-                             "still talks money even though the model does not. "
+                             "is still stated in dollars even though the model is not. "
                              "Default **33.5%** = \\$25.1B ÷ \\$75B, both legs dated mid-2026. The "
                              "rule that fixes it: every leg must estimate the **instantaneous "
                              "flow at the same anchor date**, and a calendar-year total already "
                              "*is* a mid-year flow reading, so nothing needs annualizing. The "
                              "retired 53.3% was not overruled but **re-dated** — it divided a "
                              "mid-2026 cost by a spiked May-2026 earnings run-rate, and on one "
-                             "date the same evidence is 33.5%. Envelope [26, 46]. Grade C.",
+                             "date the same evidence is 33.5%. Envelope [26, 46.3], both ends "
+                             "read off a construction on the menu. Grade C.",
                       math_label='\\rho', uni_label='ρ', short_name='coverage at t = 0',
                       cal_target='labs earn ~33 cents per dollar of model-building spend today',
                       cal_alt='**Population, not basis:** striking Meta from both sides '
                               'gives 38.6%, striking Google 26.2% — worth ~5 and ~7 pp, and the '
-                              'only discretionary spread left. An audited Anthropic '
+                              'only discretionary spread left. Push the Google earnings leg to '
+                              'the top of its judgment span at the same time and the '
+                              'labs-favourable corner reads 46.3%, which is where the range '
+                              'ends. An audited Anthropic '
                               'calendar-2026 figure above \\$26B would move the dial back up.',
                       grade='C'),
     # D-084 — the POSITION dials, one per use of the universal transition curve Γ. Pavel: "in the
@@ -137,8 +146,9 @@ PARAMS: dict[str, ParamMeta] = {
     't_eff_x': ParamMeta(uni_label='eff. compute ×/yr', short_name='effective-compute growth today'),
     't_lag_mo': ParamMeta(uni_label='lag (mo)', short_name='fringe lag'),
     't_price_x': ParamMeta(uni_label='price-perf ×/yr', short_name='compute price-performance'),
-    't_value_x': ParamMeta(uni_label='value ×/OOM', short_name='value multiplier per OOM'),
-    't_value_inf_x': ParamMeta(uni_label='asympt. value ×/OOM', short_name='asymptotic value per OOM'),
+    't_value_growth': ParamMeta(uni_label='value growth ×/yr', short_name='value growth today'),
+    't_value_growth_inf': ParamMeta(uni_label='asympt. value growth ×/yr',
+                                    short_name='long-run value growth'),
     't_floor_x': ParamMeta(uni_label='floor ×/yr', short_name='long-run compute floor'),
 }
 
@@ -147,9 +157,8 @@ PARAMS: dict[str, ParamMeta] = {
 # registry, so each line stays visibly short. What it is + units — no rationale, no defaults.
 _SHORT_TIPS = {
     'cov0': "Earnings ÷ model-building cost today (%) — break-even at 100%.",
-    'ell': "How many years ahead the next model's compute is paid for.",
     'gamma': "How fast the AI-R&D speedup grows with capability — recursive self-improvement. 0 = off.",
-    'beta0': "How much faster AI makes AI R&D today.",
+    'beta0': "AI's share of frontier-lab research throughput today — an input level, not a speedup.",
     't_mid': "The year by which half the compute slowdown has played out.",
     'p0_c': "How much of the compute slowdown has already happened, today (%).",
     'x_mid': "Where the value-slope transition is half-done (OOM above the 2026 frontier).",
@@ -162,7 +171,6 @@ _SHORT_TIPS = {
     'split': "Share of the initial gap that is algorithmic rather than compute.",
     'tau': "How many months the leader withholds its newest model.",
     'eta': "How substitutable compute and researchers are in R&D.",
-    'phi_RD': "R&D staff and experiment overhead on top of the training-compute bill.",
     'alpha': "Share of algorithmic progress carried by experiment-compute growth.",
 }
 for _k, _v in _SHORT_TIPS.items():
@@ -216,8 +224,8 @@ INTERP_T = {
                     "slow? (%)** This is $\\alpha$, asked as a question a lab insider could "
                     "actually answer. Because both research channels are normalised to 1 today, "
                     "$\\alpha$ *is* the elasticity of algorithmic progress to compute growth — at "
-                    "the base $\\eta = 1$ the answer is exactly $\\alpha/2$, so **35% ⇒ "
-                    "$\\alpha = 0.70$** (range 22–45% ⇒ 0.45–0.90, grade C+). The evidence splits "
+                    "the base $\\eta = 0$ the answer is exactly $1 - 2^{-\\alpha}$, so **38.44% ⇒ "
+                    "$\\alpha = 0.70$** (range 27–47% ⇒ 0.45–0.92, grade C+). The evidence splits "
                     "on *which* share this is: the **level** reading (compute's share of R&D "
                     "spend, Epoch's $\\epsilon_K \\approx 0.67$) and the **growth** reading "
                     "(compute's share of research-effort *growth*, ≈0.84, which is what this "
@@ -255,20 +263,47 @@ INTERP_T = {
                  "Aydos 2023: 1.39×/yr, CI [1.27, 1.54]), trusted directly rather than fitted as a "
                  "residual. Sets $g_p = \\log_{10}(\\cdot)$; the training **bill** growth "
                  "$10^{g_c-g_p}$ = 2.35×/yr is then a read-out (observed: 2.4×/yr).",
-    "t_value_x": "**Value multiplier per OOM (×).** How much more a model one OOM more capable is "
-                 "worth — **2.1×/OOM**, the pooled median of three independent constructions "
-                 "(Davidson value datum 1.86 · GATE ramp vs the wage bill 2.30 · revenue "
-                 "decomposition 2.24), 90% band [1.7, 2.65]. The break-even pivot is ≈1.64×/OOM, "
-                 "so the verdict turns on this dial more than on any other. Sets $\\nu = "
-                 "\\log_{10}(\\cdot)$ (value-OOMs per capability-OOM).",
-    "t_value_inf_x": "**Asymptotic value per OOM (×).** Where the value slope lands once "
-                      "the transition is done: far past $x_{mid}$ each further OOM "
-                      "is worth this factor more — the hard ceiling is retired, value "
-                      "keeps growing at this floor slope. Default ×1.25, a placeholder "
-                      "flagged for the calibration round. Sets $\\nu_\\infty = \\log_{10}(\\cdot)$.",
+    "t_value_growth": "**Value growth today (×/yr).** How fast AI-attributable value is growing "
+                      "right now — **×2.19/yr**, i.e. it a little more than doubles each year "
+                      "(**119%/yr**, the same number stated as a percentage). "
+                      "That round rate is the calibrated anchor; at the frontier's own speed it "
+                      "is **≈×2.10 per OOM**. The frontier gains ×11.34/yr of effective "
+                      "compute, and $\\nu\\,\\dot x^L$ turns the slope into a growth rate — read "
+                      "backwards, ×2.19/yr fixes $\\nu$. The ×/OOM reading is "
+                      "the pooled central value across three independent constructions "
+                      "(Davidson value datum 1.86 · GATE ramp vs the wage bill 2.30 · revenue "
+                      "decomposition 2.24) — an equally-weighted Monte Carlo over their input "
+                      "bands, p50 = 2.08, not the median of those three numbers — with a "
+                      "90% band [1.7, 2.65] ⇒ [×1.75, ×2.79]/yr here. The break-even pivot "
+                      "is ≈⟪BE_VM⟫×/OOM, so the verdict turns on this dial more than on any "
+                      "other. "
+                      "Sets $\\nu = \\log_{10}(m)/\\dot x^L_0$ — move the speed dials "
+                      "and the same rate implies a different slope, which is the point: the "
+                      "**rate** is what is observed, the slope is what the model uses.",
+    "t_value_growth_inf": "**Long-run value growth (×/yr).** How fast AI-attributable value "
+                      "grows once the value slope has finished easing — far past $x_{mid}$ each "
+                      "further OOM is worth ×$10^{\\nu_\\infty}$ more, with no hard ceiling, so "
+                      "value keeps growing at that floor slope. Default **×1.10/yr** (10%/yr): "
+                      "the floor of "
+                      "Amodei's own 10–20% forecast, granted on purpose — the adversarial "
+                      "reading, where the leader's bill has to be covered on the optimist's own "
+                      "premise. Envelope **[×1.00, ×1.30]/yr** — no growth to 30%/yr — spans the "
+                      "published worldviews, from "
+                      "stagnation to the explosive-growth threshold; the » menu carries them as "
+                      "clickable rows (Jones's 2% trend · mainstream-plus-AI 2.5–3.5% · "
+                      "Korinek–Suh's 18% · Davidson's 30%). Sets $\\nu_\\infty = "
+                      "\\log_{10}(m)/\\dot x^L_T$, at the frontier speed the **horizon** reaches "
+                      "(0.409 OOM/yr at the defaults, down from 1.055 today) — past the horizon "
+                      "the $\\psi$ feedback diverges, so there is no true asymptote to read.",
     "t_floor_x": "**Long-run compute floor (×/yr).** Compute scaling once power/fab/capital limits "
-                 "bind (~2030) — hardware-only price-performance ≈ **1.35×/yr** (grade C, our "
-                 "extrapolation). Sets $g_{c\\infty} = \\log_{10}(\\cdot)$.",
+                 "bind (~2030). TWO LEGS, multiplied: what a dollar buys (hardware "
+                 "price-performance, **≈1.38×/yr** measured) × how fast the real training budget "
+                 "grows (**≈+2.3 %/yr**, long-run economic growth). Together **≈1.41×/yr** — "
+                 "grade C, because the pairing is extrapolated past 2030 and no series measures "
+                 "frontier compute growth there. The model has exactly one price of compute, so "
+                 "wherever you set this dial it names an implied long-run budget growth: "
+                 "**×⟪FLOOR_BILL_X⟫/yr** at the current setting. Sets "
+                 "$g_{c\\infty} = \\log_{10}(\\cdot)$.",
 }
 
 # The targets' row-title tooltips (D-078 follow-up) — same contract as SHORT_TIP: what it is +
@@ -278,9 +313,9 @@ SHORT_TIP_T = {
     "t_eff_x": "Total frontier speed: physical compute × algorithms, data, know-how (×/yr).",
     "t_lag_mo": "How many months the competitive fringe trails the frontier today.",
     "t_price_x": "How much more training compute a dollar buys each year (×/yr).",
-    "t_value_x": "How much more a model one OOM more capable is worth (×).",
-    "t_value_inf_x": "How much more each OOM is worth once the transition is done (×).",
-    "t_floor_x": "Long-run compute scaling once power and fab limits bind (×/yr).",
+    "t_value_growth": "How fast AI-attributable value is growing today (×/yr).",
+    "t_value_growth_inf": "How fast that value grows once the slope has finished easing (×/yr).",
+    "t_floor_x": "Long-run compute scaling: hardware price-performance × budget growth (×/yr).",
     "loss_half_gC": "If experiment-compute growth halved, how much slower algorithms get (%).",
 }
 
@@ -292,8 +327,14 @@ TSPEC = {
     "t_eff_x":     ("Effective compute (×/yr)", 0.01, "%.2f"),
     "t_lag_mo":    ("Fringe lag (months)", 0.05, "%.1f"),
     "t_price_x":   ("Price-performance (×/yr)", 0.01, "%.2f"),
-    "t_value_x":   ("Value per OOM (×)", 0.01, "%.2f"),
-    "t_value_inf_x": ("Asymptotic value per OOM (×)", 0.01, "%.2f"),
+    # D-120: both value dials are growth rates. D-118 rider (Pavel, 2026-08-02, "just round it
+    # to integer"): both are dialled on a WHOLE-PERCENT grid. D-133 keys them in ×/yr like every
+    # other rate dial here, and the grid carries across exactly — 1 %/yr IS 0.01 ×/yr, so the
+    # step and format become the 0.01 / "%.2f" the four ×/yr dials above already use, the anchors
+    # (×2.19, ×1.10) and the envelope ends land on it exactly, and one click still moves ν by only
+    # ≈0.004–0.007 value-OOM per OOM. The %/yr reading rides on the calibration cards.
+    "t_value_growth": ("Value growth today (×/yr)", 0.01, "%.2f"),
+    "t_value_growth_inf": ("Long-run value growth (×/yr)", 0.01, "%.2f"),
     "t_floor_x":   ("Compute floor (×/yr)", 0.01, "%.2f"),
     # D-098. A PERCENT, hence no t_ prefix (the t_…_x / t_…_mo convention names a multiplier).
     "loss_half_gC": ("Progress lost if compute growth halves (%)", 0.5, "%.1f"),
@@ -311,15 +352,13 @@ LEVEL_INTRO = {
        "outcome is the **coverage** $\\rho_t = E_t/B_t$ (now ⟪COV0⟫%, break-even 100%). "
        "**This explorer is layered:** raise the level (top bar) to add the next block of "
        "mechanisms.",
-    # D-081 merged Level 2 — Pavel's two-opposing-forces story, with the live ℓ jump number
-    # (combination ruling: this variant's compact intro kept as-is, adapted to D-082's t_mid).
+    # D-081 merged Level 2 — Pavel's two-opposing-forces story. (It used to carry a live ℓ jump
+    # number in the compute-slowdown clause; D-127 removed ℓ from the model, and with it the
+    # ⟪JUMP⟫/⟪ELL⟫ tokens and their producers in _live_vals.)
     2: "**Dynamics — two opposing forces.** Level 1 held every growth rate constant; now the "
        "dynamics arrive. **(1) Compute growth slows down:** ~⟪GC_X⟫×/yr scaling "
        "cannot persist — it rides a transition curve down to the floor $g_{c\\infty}$, "
-       "half-done at $t_{mid}$, with $q^c_0$ of it already behind us "
-       "— and the training bill is paid **$\\ell$ years ahead** (≈ **⟪JUMP⟫×** "
-       "today's compute at $\\ell = $ ⟪ELL⟫; under steady growth a constant shift the "
-       "anchoring absorbs, so only the *bending* curve makes it bite). **(2) Algorithmic "
+       "half-done at $t_{mid}$, with $q^c_0$ of it already behind us. **(2) Algorithmic "
        "progress speeds up:** AI accelerates its *own* R&D (the $\\psi$ feedback, strength "
        "$\\gamma$). The **net effect can go either way** — the closing *speed race* block "
        "reads off which force wins. Value's slope also starts easing: $\\nu$ before the "
@@ -357,8 +396,6 @@ def _live_vals(d):
     """Current effective values for the ⟪TOKEN⟫ placeholders (fallbacks = the pinned defaults)."""
     gc = d.get("g_C0", P0.g_C0)
     ga = d.get("g_a", P0.g_a)
-    # L1 pins ℓ=0 → hypothetical default; mid-sidebar the slider state is already live
-    ell = d.get("ell") or st.session_state.get("w_ell") or P0.ell
     Delta0 = d.get("Delta0", P0.Delta0)
     nu = d.get("nu", P0.nu)
     gp = d.get("g_p", P0.g_p)
@@ -378,7 +415,6 @@ def _live_vals(d):
     ddev, drel = m.stationary_catchup(
         m.Params(**{**d, "g_a_F": gaf, "g_CF0": gcf, "split": split}), merged=False)
     return {
-        "JUMP": f"{10.0 ** (gc * ell):.2f}", "ELL": f"{ell:.2f}",
         "GC_X": f"{10.0 ** gc:.1f}", "DELTA": f"{speed / Delta0:.2f}",
         "WEDGE": f"{max(speed - (gaf + gcf), 0.0):.2f}",
         # D-034: the effective single rate is δ_rel + split·δ_dev — the LIVE split, not the
@@ -388,7 +424,44 @@ def _live_vals(d):
         # none had a consumer left once the finance prose stopped quoting \$40B and \$75B.
         "COV0": f"{100.0 * rho:.0f}",
         "REV_X": f"{10.0 ** (nu * speed):.2f}", "COST_X": f"{10.0 ** (gc - gp):.2f}",
+        # The break-even value multiplier — the ν that balances 10^{ν(g_c+g_a)} against
+        # 10^{g_c-g_p}, i.e. cost_x^(1/speed). It is the SAME quantity the Level-1 race card
+        # prints (ui/equations.py `be_vm`), so it must be computed here rather than quoted:
+        # the prose carried a frozen 1.64 from a retired calibration while the card rendered
+        # 2.25, and the two screens gave opposite verdicts on the headline question.
+        "BE_VM": f"{10.0 ** ((gc - gp) / speed):.2f}" if speed > 0 else "—",
         "GEFF_X": f"{10.0 ** speed:.2f}", "GA_X": f"{10.0 ** ga:.2f}",
+        # D-129: the floor's own read-out. The compute-growth floor is calibrated AS two legs —
+        # hardware price-performance plus real budget growth — and since the model has exactly
+        # one price series, whatever the dial is set to NAMES an implied long-run budget growth.
+        # Surfacing it beside the dial is what makes the two-leg construct legible: the shipped
+        # floor reads ×1.02/yr (+2.3 %/yr real), and the retired 0.13 read ×0.98 — a budget
+        # shrinking forever, which was the defect the recalibration fixed.
+        "FLOOR_BILL_X": f"{10.0 ** (d.get('g_C_inf', P0.g_C_inf) - gp):.2f}",
+        # D-132 (XM5): the value block's one internal cross-check, on the card that owns it.
+        # Read as a bounded market, (x_mid, p0_w) OVER-DETERMINE the total value multiple, and
+        # until now nothing noticed when they over-determined it inconsistently — the retired
+        # (10.0, 1%) pair implied 1853× against p0_w's own 100×. See model_profit.value_coherence
+        # for why this is a warning rather than an error: the identity binds only at nu_inf = 0,
+        # and a user running the Amodei steelman is not doing anything wrong by tripping it.
+        **_coherence_tokens(d),
+    }
+
+
+def _coherence_tokens(d):
+    """The XM5 read-out tokens. Split out because the identity is the model's, not the card's —
+    it lives in `model_profit` and is exercised by tests there; this only formats it."""
+    p = m.Params(**d)
+    implied, asserted, gap, ok = m.value_coherence(p)
+    return {
+        "VAL_M_IMPLIED": f"{implied:,.0f}" if implied >= 10.0 else f"{implied:.1f}",
+        "VAL_M_ASSERTED": f"{asserted:,.0f}",
+        "VAL_M_COHERENT": f"{m.coherent_x_mid(p):.2f}",
+        # The one-line warning itself: empty when the pair is coherent, so the sentence simply
+        # is not there rather than reading "no problem" at the reader.
+        "VAL_M_WARN": "" if ok else (
+            f" ⚠ These two readings are {abs(gap):.1f} OOM apart — the pair is incoherent "
+            f"under the bounded-market structure."),
     }
 
 

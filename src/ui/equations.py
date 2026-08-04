@@ -5,12 +5,15 @@ level's own subsection(s), and the show-all view marks them with a subtle border
 expander header instead.
 
 D-081 (levels 2–5 merged into one Level 2 "Dynamics"): the house rule "each level updates
-exactly ONE subsection" cannot survive a 4-way merge, so `_CHANGED_AT` is now TUPLE-valued —
-Level 2 changes four subsections at once AND adds one (the speed race). The concise view renders
-them in STORY order (the two opposing forces — slowdown, then RSI acceleration — then their
-riders ℓ and x_mid, then the speed race), opened by a one-line orientation caption naming the changed blocks
-and stating that follower/earnings/coverage carry over; the show-all view accent-marks all of them.
+exactly ONE subsection" cannot survive a merge, so `_CHANGED_AT` is TUPLE-valued — Level 2 changes
+THREE subsections at once AND adds one (the speed race). The concise view renders them in STORY
+order (the two opposing forces — slowdown, then RSI acceleration — then the value bend x_mid, then
+the speed race), opened by a one-line orientation caption naming the changed blocks and stating
+that cost/follower/earnings/coverage carry over; the show-all view accent-marks all of them.
 Every other level still changes exactly one subsection.
+(D-127: it was FOUR-changed until the build lag ℓ was removed from the model. ℓ was the cost
+block's only Level-2 content, so `cost` left `_CHANGED_AT[2]` with it — a block that introduces
+nothing must not be marked as changed, or the caption and the accent marks contradict each other.)
 
 D-092 RETIRED THE `curve` SUBSECTION (Pavel: "I said that the sigmoid function should be hidden
 inside the model so it should not be definition. It's just a technical detail which should not be
@@ -234,7 +237,7 @@ def _profit_condition(level, dd):
             yrs = float(_np.log(ratio) / _np.log(rev_x / cost_x)) if ratio > 1 else 0.0
             st.markdown(f":green[**✓ ×{rev_x:.2f} > ×{cost_x:.2f} — earnings outrun cost ⇒ "
                         "coverage rises ⇒ break-even sooner or later, for good.**]")
-            st.markdown(f"Coverage starts at **{cov0:.0f}%** (the $\\rho_0$ dial), so climbing "
+            st.markdown(f"Coverage starts at **{cov0:.0f}%** (the $\\rho$ dial), so climbing "
                         f"to 100% takes about **{yrs:.1f} years**.")
         else:
             st.markdown(f":red[**✗ ×{rev_x:.2f} < ×{cost_x:.2f} — cost outruns earnings ⇒ "
@@ -288,7 +291,7 @@ def _speed_race(dd, sim, level):
                     "modelling:")
         if blown:
             st.markdown(":red[**↗ Run-away: the $\\psi$ feedback goes super-exponential inside "
-                        "the horizon (spec N4), so the speed *at* $T$ has no meaning.**] Lower "
+                        "the horizon, so the speed *at* $T$ has no meaning.**] Lower "
                         "$\\gamma$ or $\\beta_0$ — or freeze AI assistance — to read the race.")
             return
         st.latex(
@@ -362,13 +365,17 @@ _SUB_LABEL = {"leader_compute": "Leader compute  ċᴸ",
               "revenue": "Earnings", "cost": "Cost", "coverage": "Coverage",
               "race": "Frontier speed race  ẋᴸ"}
 # level -> the subsections changed / new at that level, TUPLE-valued since D-081 (L1: nothing).
-# The merged Level 2 changes FOUR at once and ADDS one, listed in STORY order — the concise
+# The merged Level 2 changes THREE at once and ADDS one, listed in STORY order — the concise
 # view renders them in exactly this order (not _SUB_ORDER): force 1 the compute slowdown
-# (leader_compute), force 2 the ψ/RSI acceleration (leader_algo), then the riders — ℓ, which
-# the slowdown makes bite (cost), and the saturation bend x_mid (value) — and LAST the speed
-# race that reads off which force wins (Pavel: "like the basic model has [a] subsection about
-# profit"). Cost is tagged at BOTH 2 (ℓ unpins) and 5 (the R&D overhead φ_RD).
-_CHANGED_AT = {2: ("leader_compute", "leader_algo", "cost", "value", "race"),
+# (leader_compute), force 2 the ψ/RSI acceleration (leader_algo), then the saturation bend x_mid
+# (value) — and LAST the speed race that reads off which force wins (Pavel: "like the basic model
+# has [a] subsection about profit").
+# D-127 REMOVED "cost" from this tuple. It was tagged here because ℓ unpinned at Level 2 (and, on
+# the old ladder, again at 5 for the R&D overhead φ_RD); both parameters are now gone from the
+# model, so the cost block's equation and its one card (g_p, a Level-1 control) are identical at
+# every level. Leaving it tagged would open an unchanged block in the concise view and accent-mark
+# it in the show-all view, both of which would contradict the caption's "carry over".
+_CHANGED_AT = {2: ("leader_compute", "leader_algo", "value", "race"),
                3: ("follower",)}
 
 
@@ -397,7 +404,7 @@ def subsection_param_entries(sub_id, level):
             # equation order (Pavel's addendum): α is the first symbol inside the bracket,
             # (1−α)(ψ/ψ(0))^η, so it leads; η follows in the CES exponent; the ψ DEFINITION
             # introduces β₀ and γ after that. η is a real dial from L2 (Pavel: "I don't want
-            # eta = 1 to be assumed") and since D-098 so is α.
+            # eta = 1 to be assumed"; D-125 made it continuous) and since D-098 so is α.
             #
             # D-098 FOLLOW-UP — this registration is load-bearing twice over, and its absence
             # was the defect: this table drives `sidebar_filter_keys`, so an unregistered α made
@@ -434,9 +441,9 @@ def subsection_param_entries(sub_id, level):
     if sub_id == "cost":
         # k and B₀ left with the dollars (D-093): the bill's LEVEL is the normaliser now, so
         # this block has no constant of its own at any level.
+        # NO LEVEL-2 CARD since D-127. `ell` rode here at level >= 2 until the build lag was
+        # removed from the model (D-123); the cost block's only card is g_p, at every level.
         cards = []
-        if level >= 2:
-            cards.append(("ell", False))
         # D-106: UN-PINNED. g_p is one of exactly four numbers in the base model's closed-form
         # break-even condition ν(g_c+g_a) > g_c − g_p (D-105), and Epoch's grade-A interval
         # [×1.27, ×1.54] straddles the ×1.482 threshold that reverses the verdict — so its rails
@@ -519,30 +526,36 @@ def equations_panel(level, dd, p, sim=None):
     `sim` is the already-computed (cached) trajectory the charts use — the D-081 speed-race
     subsection reads the leader's realised path off it; None just drops that card."""
     st.markdown("**Equations & calibration at this level**")
+    # The legend must list every chip the source cards can render (_GRADE_COLORS carries five),
+    # and it must not still call the base defaults provisional — that round closed and was
+    # ratified; only the envelopes flagged *flagged* in their own cards are still proposals.
     st.caption("Grades: **A** solid data anchor · **B** reasonable anchor · **C** judgment / weakly "
-               "identified · **F** free choice or decision variable. Each right-hand card shows "
-               "value, MC range and calibration target; **details** has the full note and any "
-               "alternatives. Defaults are provisional → calibration session.")
+               "identified · **D** vendor claim / press report · **F** free choice or decision "
+               "variable. Each right-hand card shows value, MC range and calibration target; "
+               "**details** has the full note and any alternatives. Base-model defaults are "
+               "calibrated; the extension envelopes marked *flagged* are still provisional.")
     if level == 1:
         st.caption("The Level-1 controls are all **observables**: compute scaling (⇒ $g_c$), "
                    "effective-compute growth (⇒ $g_a$ as its residual), value per OOM (⇒ $\\nu$), "
-                   "coverage today (⇒ $\\rho$, the finance side's one parameter) and the "
-                   "fringe lag (⇒ $\\Delta_0$, $\\delta$). Shown but not dialled: $g_p$, the "
-                   "measured hardware leg. Capability $x = a + c$ is in **OOM** — orders of "
-                   "magnitude, factors of 10 — of *effective* compute, measured above the "
-                   "early-2026 frontier, so $x = 0$ is today.")
+                   "coverage today (⇒ $\\rho$, the finance side's one parameter), the "
+                   "fringe lag (⇒ $\\Delta_0$, $\\delta$) and compute price-performance "
+                   "(⇒ $g_p$, the measured hardware leg). Capability $x = a + c$ is in "
+                   "**OOM** — orders of magnitude, factors of 10 — of *effective* compute, "
+                   "measured above the mid-2026 frontier, so $x = 0$ is today.")
     elif level == 2:
         # D-081 orientation line (Pavel's combination ruling: grafted from the rival variant,
         # extended for the race): the merge breaks the one-subsection-per-level rule, so the
         # pane says up front WHICH blocks moved — and that the rest carries over unchanged.
-        st.caption("**Level 2 changes four blocks and adds one:** "
+        # D-127 (ruled): THREE blocks, not four. Cost was the fourth until the build lag ℓ was
+        # removed — with ℓ gone the cost block introduces nothing at Level 2 (its one dial, g_p,
+        # is a Level-1 control), so naming it here would point at a block with no new content.
+        st.caption("**Level 2 changes three blocks and adds one:** "
                    "leader compute (it *slows* — "
                    "force 1), leader algorithmic progress (AI now speeds up its own R&D — "
-                   "force 2), cost (the lead time $\\ell$ starts to bite once the compute curve "
-                   "bends) and value (it *bends* at $x_{mid}$) — plus a new **frontier speed "
-                   "race** block at the end that reads off which force wins. Follower, earnings "
-                   "and coverage carry over from Level 1 unchanged. Each rate that now *moves* "
-                   "carries a small graph of its own path, beside its own equation.")
+                   "force 2) and value (it *bends* at $x_{mid}$) — plus a new **frontier speed "
+                   "race** block at the end that reads off which force wins. Cost, follower, "
+                   "earnings and coverage carry over from Level 1 unchanged. Each rate that now "
+                   "*moves* carries a small graph of its own path, beside its own equation.")
     # CONCISE by default (Pavel's ruling): only the subsection(s) changed at this level show;
     # one checkbox expands to the full model. At L1 EVERYTHING is new, so all subsections
     # show and the checkbox is hidden (D-048). The old display-mode tabs' stale session key
@@ -605,10 +618,11 @@ def equations_panel(level, dd, p, sim=None):
                     # the slowdown switch on together at L2; the general ratio form IS the
                     # story: the slowdown drags the experiment term while ψ pushes. Pavel's η
                     # addendum: the CES exponent is DISPLAYED and dialled from this level —
-                    # never a silent η = 1 substitution.)
+                    # never a silent substitution of whatever the default happens to be.)
                     eq("**Force 2 — algorithmic progress speeds up.** The constant $g_a$ of "
                        "Level 1 now responds to research inputs: a CES mix (curvature $\\eta$; "
-                       "$\\eta = 1$, the default, is a plain weighted average) of the "
+                       "$\\eta = 0$, the default, is Cobb-Douglas — a geometric mean, so "
+                       "neither input can be starved without cost) of the "
                        "AI-assistance feedback $\\psi$ and experiment compute.",
                        r"\dot a^L_t = g_a\left[(1-\alpha)\Big(\tfrac{\psi(x^L_t)}{\psi(0)}\Big)^{\eta} "
                        r"+ \alpha\Big(\tfrac{g_{c,t}}{g_c}\Big)^{\eta}\right]^{1/\eta},"
@@ -693,8 +707,8 @@ def equations_panel(level, dd, p, sim=None):
                         f"frontier, easing toward ×{10.0 ** dd['nu_inf']:.2f}, half way "
                         f"{dd['x_mid']:.0f} OOM out. The axis here is CAPABILITY, not time — "
                         f"how far the frontier has moved, not when.")
-                    st.caption(":gray[D-088: $\\nu$ is literally today's slope, $w'(0)$ — "
-                               "dial 2.1× per OOM and you get 2.1× at today's frontier, at "
+                    st.caption(":gray[$\\nu$ is literally today's slope, $w'(0)$ — "
+                               "dial ×2.19/yr and value grows at ×2.19/yr today, at "
                                "every $q^w_0$. It used to be the slope *before* the easing, "
                                "which made the dial read about 1% low.]")
             _cal_cards(right, subsection_param_entries("value", level), dd, p)
@@ -725,46 +739,24 @@ def equations_panel(level, dd, p, sim=None):
                           "dial, $\\rho$, lives in **Coverage** below)")
         elif sub_id == "cost":
             with left:
-                # (the φ_RD markup branch is retired with the cost-mechanism level — φ_RD is
-                # provably inert under the observed-bill anchor; parked in the spec)
-                if level >= 2:
-                    # Under the ratified observed-bill anchor moving ℓ leaves the t = 0 bill
-                    # where it is, so ℓ tilts the path rather than lifting the level. D-090
-                    # referenced the path to c^L_ℓ so it stopped re-anchoring anything; D-093
-                    # then normalised the constant away, so B₀ = 1 and the de-lagging happens
-                    # entirely inside the cost function. (Extensions-sync round, audit X-24: the old EL1a/b/c TODO here is
-                    # resolved — the counterfactual-ℓ view designed in brief 06b stays a PARKED
-                    # design option, recorded in the decision log, not a pending code task.)
-                    eq("Training in advance (new here): the firm pays now for the compute of the "
-                       "model shipping $\\ell$ ahead, at prices falling at $g_p$. The bill is "
-                       "measured against *today's*, so it starts at 1 whatever $\\ell$ is — what "
-                       "$\\ell$ changes is the **tilt** of the path. Under Level 1's steady growth "
-                       "even that cancels exactly; the slowdown arriving at this same level is "
-                       "what makes it bite.",
-                       r"B_t = 10^{\,c^L_{t+\ell} - c^L_\ell - g_p t}")
-                    if level == 2:
-                        # kept from the old Level-2 card (via the rival variant): the concrete
-                        # anchor for why ℓ matters
-                        st.caption("Funding the *next*, bigger model while the current one only "
-                                   "breaks even is what can drag today's coverage down — the "
-                                   "reported Anthropic-vs-OpenAI contrast (profit per model "
-                                   "vs loss while scaling), depending on calibration.")
-                else:
-                    # D-093: no dollar figure survives here. The old line quoted k·R₀ = $75B,
-                    # which was a calibration input, not a model quantity — and the widget's
-                    # result never depended on it. The displayed form drops the reference point
-                    # c^L_0 because it is EXACTLY 0 (the x^L_0 = 0 normalisation, bitwise at
-                    # every configuration), which is what lets the base case read as one clean
-                    # exponent — Pavel's own wording, and the form the paper ships (d4d9019).
-                    # The ℓ > 0 branch above cannot do this: c^L_ℓ is not zero.
-                    eq("The training bill: this period's model-building outlay — compute *and* "
-                       "R&D overhead together — carried forward along the compute path at "
-                       "prices falling at $g_p$, so it grows at "
-                       f"×{10.0 ** (dd['g_C0'] - dd['g_p']):.2f}/yr. It is measured **in "
-                       "multiples of today's bill**, so it starts at 1 by construction.",
-                       r"B_t = 10^{\,c^L_t - g_p t}")
-            # (no ℓ chip at L1 — Pavel, 2026-07-27: ℓ has not been introduced yet, so the base
-            # level must not mention it at all; the cost line above already reads plain c^L_t)
+                # ONE cost equation at every level since D-127. The two branches that stood here
+                # — a Level-1 form and an ℓ-lagged Level-2 form ("Training in advance") — collapse
+                # into the L1 one, because removing the build lag (D-123) leaves the cost block
+                # with nothing new to say at Level 2. The φ_RD markup branch had already gone the
+                # same way, and D-126 removed the parameter itself.
+                #
+                # D-093: no dollar figure survives here. The old line quoted k·R₀ = $75B, which
+                # was a calibration input, not a model quantity — and the widget's result never
+                # depended on it. The displayed form drops the reference point c^L_0 because it is
+                # EXACTLY 0 (the x^L_0 = 0 normalisation, bitwise at every configuration), which
+                # is what lets it read as one clean exponent — Pavel's own wording, and the form
+                # the paper ships (d4d9019).
+                eq("The training bill: this period's model-building outlay — compute *and* "
+                   "R&D overhead together — carried forward along the compute path at "
+                   "prices falling at $g_p$, so it grows at "
+                   f"×{10.0 ** (dd['g_C0'] - dd['g_p']):.2f}/yr. It is measured **in "
+                   "multiples of today's bill**, so it starts at 1 by construction.",
+                   r"B_t = 10^{\,c^L_t - g_p t}")
             _cal_cards(right, subsection_param_entries("cost", level), dd, p)
         elif sub_id == "coverage":
             with left:

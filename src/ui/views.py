@@ -37,11 +37,11 @@ def _warnings(sim, LEVEL):
         if xL_max > 25.0:
             blow_t = float(sim["t"][np.argmax(sim["x_L"] > 25.0)])
             warns.append(f"BLOW-UP: the leader path passes +25 OOM at t = {blow_t:.1f} yr — the "
-                         f"$\\psi$ feedback has gone super-exponential (finite-time singularity, "
-                         f"spec N4). Curves beyond that point are meaningless; lower "
+                         f"$\\psi$ feedback has gone super-exponential (a finite-time "
+                         f"singularity). Curves beyond that point are meaningless; lower "
                          f"$\\gamma$/$\\beta_0$ or freeze AI assistance.")
     if not cap_ok:
-        warns.append("Consistency cap hit (spec N2): somewhere the follower's capability $x^F$ "
+        warns.append("Consistency cap hit: somewhere the follower's capability $x^F$ "
                      "exceeds the model the leader serves, or the served model is worth less than "
                      "the follower's — cases the model isn't meant to cover. The affected terms "
                      "are floored where this bites, so read those stretches with caution.")
@@ -160,7 +160,7 @@ def _capability_tile(d, sim, LEVEL, mode_mc, mc_key):
         show(f, key="pt_cap")
         st.caption("**OOM** = orders of magnitude — factors of 10 — of *effective* compute, "
                    "physical compute times everything else (architecture, data, post-training "
-                   "know-how). Measured **above the early-2026 frontier**, so 0 is today.")
+                   "know-how). Measured **above the mid-2026 frontier**, so 0 is today.")
 
         gap_ttl = ("Capability gap  Δ  &  RSI-feedback share  ψ" if show_growth
                    else "Capability gap — how far ahead the leader is  Δ = xᴸ − xᶠ")

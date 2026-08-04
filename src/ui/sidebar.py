@@ -19,12 +19,13 @@ import streamlit as st
 
 from .content import INTERP, INTERP_T, SHORT_TIP, SHORT_TIP_T, TSPEC, _sub_live, lag_note
 from .equations import param_subsection, sidebar_filter_keys
-from .levels import apply_level_pins, merged_delta
+from .levels import (apply_level_pins, apply_post_inversion_pins, level_sample_keys,
+                     merged_delta)
 from .mc import _inspected_params
 from .model_access import m, P0, TDEF
 from .state import (ADVANCED_DIALS, APP_RANGES, _active_span, _commit_range_s,
                     _commit_sampled, _default_sampled, _default_span, _gc0_sym, _gc_sym,
-                    _mc_dim_editable, _mc_sampled, _reg, _reset_all, _reset_full, _reset_one,
+                    _mc_dim_editable, _mc_sampled, _reg, _reset_all, _reset_full,
                     _sampled_on, _spot_moved, _tbounds, _tbounds_of, adv_hidden, adv_open,
                     cal_open, dial, mc_active, toggle_adv, toggle_cal, toggle_param_row)
 from .theme import C_SAMPLE, inject_row_expand_css
@@ -76,6 +77,7 @@ def render(LEVEL):
 
     # ---- row builders (closures over d / LEVEL / MC_ACTIVE) --------------------------
     _track_css = []   # per-row playhead-track adornment CSS, injected ONCE at the sidebar end
+    _SAMPLED_HERE = set(level_sample_keys(LEVEL))   # what the MC actually draws at this level
 
     def _sample_tick(container, ekey):
         """The per-parameter MC switch (D-079 rider, Pavel): ticked, the draws sweep this
@@ -194,13 +196,21 @@ def render(LEVEL):
         conversion happens in the DERIVE pass below — it reads an inverted parameter, which
         pass 1 does not have. `cap` renders a live ⇒ caption from the dial value, deferred to
         pass 3 for the same reason."""
-        # (no parameter INTERP carries a ⟪TOKEN⟫ today — the live-substituted texts are the
-        # level intros and the merged-δ doc, both rendered downstream against the FINAL d —
-        # so this pass-1 `d` is enough. A tooltip cannot be deferred: help= is set at mount.)
+        # Tooltips are substituted against this pass-1 `d`, which is thinner than the final one:
+        # a token whose inputs are only derived later (⟪BE_VM⟫ reads g_C0/g_a/g_p, all emitted by
+        # the inversion) falls back to the pinned defaults here, and reads live in the » panel,
+        # which renders against the FINAL d. A tooltip cannot be deferred: help= is set at mount.
         interp = _sub_live(INTERP.get(key), d)
         default = float(np.clip(getattr(P0, key) if dial_default is None else dial_default,
                                 lo, hi))
-        sampled = key in m.PARAM_RANGES     # an MC dimension
+        # An MC dimension — a parameter-space envelope AND membership of the level's drawn set.
+        # Both clauses are load-bearing: `mc_draw_batch` consumes `level_sample_keys(LEVEL)`, so a
+        # dial with an envelope but no LEVEL_RANGED entry is never drawn however the tick is set,
+        # and offering it a tick and a trim lane would be a control that silently does nothing.
+        # η is the one such dial (D-125: continuous, so it has an envelope; deliberately unsampled,
+        # per Pavel's "MC uses spot value for this parameter"), and every other `_param` dial is in
+        # its level's list, so this clause changes nothing else.
+        sampled = key in m.PARAM_RANGES and key in _SAMPLED_HERE
         wkey = f"w_{key}"
         if not _vis(key):
             cur = float(np.clip(float(S.get(wkey, S.get(f"sv_{key}", default))), lo, hi))
@@ -279,7 +289,7 @@ def render(LEVEL):
         cs = row.columns([6.05, 0.55, 0.4] if MC_ACTIVE else [6.6, 0.4],
                          vertical_alignment="center")
         v = cs[0].slider(label, lo, hi, step=step, key=wkey, format=fmt,
-                         help=INTERP_T.get(tkey), label_visibility="collapsed",
+                         help=_sub_live(INTERP_T.get(tkey), d), label_visibility="collapsed",
                          on_change=_spot_moved, args=(tkey,))
         st.session_state[f"sv_{tkey}"] = float(v)
         if MC_ACTIVE:
@@ -297,7 +307,8 @@ def render(LEVEL):
         """The ONE money dial (D-080, Pavel): coverage ρ at t = 0, in PERCENT — and since
         D-093 the model's ONLY finance parameter, not a stand-in for three hidden ones.
         A base-level (Basics) control. Mirrors _target_row (MC tick, trim lane, band) with
-        the APP-SIDE envelope (state.APP_RANGES — [26, 46] since D-104 dated every leg) instead
+        the APP-SIDE envelope (state.APP_RANGES — [26, 46.3]: D-104 dated every leg,
+        D-128 gave the ceiling its witnessing row) instead
         of a notebook target; the dimension stays app-side because it is dialled in percent
         while Params.rho is the fraction. The default seed is EXACT (100·ρ, off the 0.1
         display grid) so the round trip is bit-exact. Returns (ρ %, row)."""
@@ -448,9 +459,17 @@ def render(LEVEL):
 
     # (the value target lives in Basics at every level — the old extensions level that used to
     # take it over is retired, D-081 ladder amendment)
-    _tparam(sb, "t_value_x", "nu",
-            lambda x: f"⇒ $\\nu$ = {x:.2f} value-OOM per OOM",
-            lambda a, b: f"⇒ $\\nu \\in$ [{a:.2f}, {b:.2f}] value-OOM per OOM")
+    # D-120: the dial is the value GROWTH RATE, in ×/yr since D-133 (the compute dials' unit;
+    # the %/yr reading rides on the calibration card), inverted through the leader's exact
+    # t = 0 speed. The caption carries both readings of the parameter it sets — the slope ν and
+    # the ×/OOM multiplier the calibration is quoted in — so nothing the ×/OOM dial used to show
+    # is lost, and the ×/OOM number is a read-out that moves with the speed dials rather than a
+    # second control that silently means a different rate at each of their settings.
+    _tparam(sb, "t_value_growth", "nu",
+            lambda x: (f"⇒ $\\nu$ = {x:.2f} value-OOM per OOM (×{10.0**x:.2f} per OOM) — at "
+                       f"today's frontier speed $\\dot x^L_0$ = {_xdot0:.2f} OOM/yr"),
+            lambda a, b: (f"⇒ $\\nu \\in$ [{a:.2f}, {b:.2f}] value-OOM per OOM "
+                          f"(×{10.0**a:.2f}–×{10.0**b:.2f} per OOM)"))
 
     # ---- the compute PRICE leg (D-106). A full Level-1 row, not a display-only card: D-105 put
     # the base model's break-even test in closed form, ν(g_c+g_a) > g_c − g_p, so g_p is one of
@@ -516,78 +535,36 @@ def render(LEVEL):
                               f"flattens (midpoint) in {d['t_mid']:.1f} yr and is "
                               f"{100.0 - v:.0f}% done by {2.0 * d['t_mid']:.1f} yr"))
         # (2) leader algo:  ȧᴸ = g_a[(1−α)(ψ/ψ(0))^η + α(g_c,t/g_c)^η]^{1/η}, ψ = 1+β₀e^{γx}
-        #     →  η (the CES exponent, before the ψ definition), then β₀, then γ (with its
-        #     freeze switch). η is a REAL DIAL here (Pavel's addendum: "I don't want eta = 1
-        #     to be assumed") — default 1 keeps every current path unchanged; a CHOICE
-        #     dimension, so it stays MC-pinned (point default; envelope → calibration round).
+        #     →  β₀, then γ (with its freeze switch), and under them, behind this section's
+        #     "Advanced calibration" expander, the two dials that shape the bracket the two of
+        #     them sit in: η (the CES exponent) and the α drag.
+        #
+        # D-135 IS WHY THIS SECTION NO LONGER RUNS IN EQUATION ORDER. Pavel's 2026-07-27 addendum
+        # orders each Level-2 group as its subsection's equations introduce their dials, and by
+        # that rule η comes first (the ψ definition is stated against it). The other two groups
+        # still obey it. Here the rule was putting the section's two least readable dials at the
+        # top of the RSI story, and Pavel ruled the cut ("Agree with the cut, go ahead"): what is
+        # visible is now the story — how much faster AI R&D goes today (β₀) and how fast that
+        # speedup grows (γ) — and the machinery is one click below it.
+        #
+        # WHY β₀ AND γ ARE NOT SPLIT, though only γ is the "growth" half the section is named for:
+        # β₀ is not separately identified. D-132 made it an INPUT level with a 75× envelope and no
+        # calibration of its own, and D-132's `cal_alt` states the pair jointly — the evidence
+        # constrains the ψ path, which is β₀ and γ together. Hiding either one would leave the
+        # other looking like a measured quantity.
+        #
+        # WHY AN EXPANDER RATHER THAN D-111's per-variable "advanced calibration" BUTTON, which is
+        # the house pattern in the two neighbouring sections: `_adv_button`'s copy is written for
+        # an S-CURVE family — "this curve's … the two endpoint dials above — the rate today and
+        # the rate it tends to — are the calibration; these two say how the curve gets from one to
+        # the other". η and the α drag are not a midpoint and a position, and there is no curve
+        # here whose endpoints β₀ and γ are, so that button would have to lie or be re-parameterised.
+        # The mechanisms also differ in a way that matters to D-065: `_adv_button` hides by not
+        # MOUNTING the row (the sv_ shadow carries the value), while an expander keeps its children
+        # mounted and merely folds them away — so here the dial itself is alive whether the reader
+        # has opened the fold or not, and the model input cannot depend on the fold at all.
         if _vis("eta", "beta0", "gamma"):
             sb.subheader("Dynamics — algorithms speed up")
-        # R8 (Pavel: "Remove Leontief from the options"). The "min (Leontief)" entry is GONE, and
-        # with it the whole η → −∞ branch of this sidebar. The LIMIT itself stays in the model —
-        # `Params.leontief` / `_ces_bracket` / `alpha_from_loss` are the mathematics of the CES
-        # family's endpoint and are tested there (test_alpha_observable's test_03) — so this is a
-        # dial change, not a model change. The widget pins the flag False, explicitly, the way it
-        # pins τ and φ_RD: `render` promises every parameter is set with no dataclass fallback.
-        eta_options = ["1 (weighted avg)", "0.61", "0 (Cobb-Douglas)", "-2 (complements)"]
-        eta_values = {"1 (weighted avg)": 1.0, "0.61": 0.61, "0 (Cobb-Douglas)": 1e-9,
-                      "-2 (complements)": -2.0}
-        eta_default = next((o for o in eta_options if abs(eta_values[o] - P0.eta) < 1e-6),
-                           eta_options[0])
-        if _vis("eta"):
-            _erow = sb.container(key="row_eta")
-            _row_head(_erow, "$\\eta$  CES exponent (compute–labor)", "eta",
-                      tip=SHORT_TIP.get("eta"))
-            ec1, ecr = _erow.columns([6.6, 0.4], vertical_alignment="center")
-            # a session carried over from before R8 can still hold "min (Leontief)", which a
-            # selectbox cannot show and `eta_values` cannot look up — clamp it to the default
-            # BEFORE the widget instantiates, the same way state.level() clamps a retired level
-            _reg("w_eta", eta_default)
-            if S.get("w_eta") not in eta_values:
-                S["w_eta"] = eta_default
-            eta_choice = ec1.selectbox("$\\eta$  CES exponent (compute–labor substitution)",
-                                       eta_options, key="w_eta",
-                                       help=INTERP.get("eta"), label_visibility="collapsed")
-            ecr.button("↺", key="r_eta", help="reset to default", on_click=_reset_one,
-                       args=("w_eta", eta_default))
-            S["_eta_mem"] = eta_choice   # survives the widget's GC while filtered out
-        else:
-            eta_choice = S.get("_eta_mem", S.get("w_eta", eta_default))
-            if eta_choice not in eta_values:
-                eta_choice = eta_default
-        d["leontief"] = False
-        d["eta"] = eta_values[eta_choice]
-        _eta_disp = eta_choice.split(" ", 1)[0]   # "1" / "0.61" / "0" / "-2", for the α caption
-        # α sits directly beneath η because they are the two halves of one bracket: η says how
-        # substitutable the inputs are, α how much weight the compute one carries. D-098 dials α
-        # through the OBSERVABLE (the drag), not the weight, so that holding the drag fixed while
-        # η moves counts the bottleneck evidence exactly once.
-        # VIEW-ONLY contract (D-065): the level filter hides the ROW, never changes the model
-        # input. So d["alpha"] is assigned on every path -- _target_row serves the sv_ shadow
-        # when it is filtered out, exactly as the eta row writes d["eta"] outside its own _vis
-        # guard. Gating the assignment instead silently dropped the key from d and test_ui's
-        # tab-independence check caught it.
-        # Gated on the PARAMETER key, not the observable's key: `_vis` reads
-        # `sidebar_filter_keys`, which is derived from `subsection_param_entries`, and that table
-        # is keyed by parameter throughout (t_compute_x is gated by g_C0 the same way). Gating on
-        # "loss_half_gC" made this row unreachable in the default Level-2 view — D-098 follow-up.
-        #
-        # ROUTED THROUGH `_tparam` (audit A/6, FM-5). R8 removed the Leontief fork above, and with
-        # it the disabled placeholder slider that fork rendered — a widget keyed
-        # `w_loss_half_gC_leontief`, seeded at 50.0, above its own vetted envelope [22, 45]. What
-        # is left is the ordinary target row, and it now goes through the SAME path every other
-        # observable takes. Before this it called `m.alpha_from_loss` INLINE, so loss_half_gC never
-        # entered `tg` and never reached the one `_invert()` below, even though `m.invert_targets`
-        # has carried the branch since D-098 — two implementations of one inversion, and the row
-        # was the only target with no ⇒ caption. It gains one, and the caption names the active η:
-        # D-098's headline property is that the delivered α MOVES with the substitution setting
-        # (adopting Epoch's 0.67 gives 0.67 at η = 1 and 0.44 at η = −2), and the widget was
-        # showing nothing that moved.
-        _tparam(sb, "loss_half_gC", "alpha",
-                lambda a: (f"⇒ $\\alpha$ = {a:.2f} at $\\eta$ = {_eta_disp} — the weight the "
-                           "model delivers for the drag you stated; it moves with $\\eta$, so "
-                           "the bottleneck evidence is counted once (D-098)"),
-                lambda a, b: (f"⇒ $\\alpha \\in$ [{a:.2f}, {b:.2f}] at $\\eta$ = "
-                              f"{_eta_disp}"))
         # β₀ and γ are the LEVEL and the GROWTH of the same object, so the two rows are
         # written to read as a pair (Pavel: the old "ψ compounding" "is not understandable…
         # how about something in the sense of RSI growth"). β₀ is dimensionless and was NOT
@@ -597,8 +574,8 @@ def render(LEVEL):
             freeze = sb.checkbox("Freeze AI assistance ($\\gamma = 0$)", key=_reg("w_freeze",
                                  bool(S.get("_freeze_mem", P0.gamma == 0.0))),
                                  help="Turns off the $\\psi$ RSI feedback. $\\gamma$ above "
-                                      "~0.182 (at the default $\\eta = 1$, $\\alpha = 0.7$ mix) "
-                                      "goes super-exponential inside the horizon (spec N4); "
+                                      "~0.182 (at the default $\\eta = 0$, $\\alpha = 0.7$ mix) "
+                                      "goes super-exponential inside the horizon; "
                                       "the runtime blow-up warning reads the simulated path, "
                                       "so it holds for any $\\eta$.")
             S["_freeze_mem"] = bool(freeze)   # survives the widget's GC while filtered out
@@ -616,22 +593,106 @@ def render(LEVEL):
             # is gone. The floor stays 0, which is the freeze switch's value and meaningful.
             _param(sb, "gamma", "$\\gamma$  how fast that speedup grows (/OOM)",
                    *dial("gamma"))
-        # (3) cost rider:  B_t = 10^{c^L_{t+ℓ}−c^L_ℓ}·10^{−g_p t}  →  ℓ
-        # (D-090 re-based the exponent on c^L_ℓ and D-093 normalised the constant away, which
-        # together make B₀ = 1 at every level and every dial — ℓ tilts the path, not the anchor.)
-        if _vis("ell"):
-            sb.subheader("Dynamics — training paid in advance")
-        _param(sb, "ell", "$\\ell$  lead time (yr)", *dial("ell"))
+        # ---- ADVANCED CALIBRATION (D-135): η and the α drag ------------------------------
+        # What is behind the fold is the CES BRACKET the RSI story runs inside, and both of its
+        # settings are conventions rather than measurements — which is the argument for folding
+        # them: η = 0 is the Cobb-Douglas grade-A convention D-125 moved the base to, and the
+        # shipped drag is the one that delivers the conventional α = 0.70. Neither is a number
+        # this project measured, and the α caption's η-dependence — the whole point of D-098 — is
+        # expert furniture: it answers a question a reader who has not opened this fold is not
+        # asking.
+        #
+        # THE FOLD IS VIEW-ONLY (D-065), and by a stronger route than the level filter's. Both
+        # calls below are UNCONDITIONAL and their containers are the only thing that changed:
+        # Streamlit keeps an expander's children mounted whether it is open or shut (the open
+        # state is client-side), so `d["eta"]` and `d["alpha"]` are written by exactly the same
+        # code on exactly the same run either way. There is no shadow-restore path to get wrong
+        # here — the sv_ shadows still carry these dials through the LEVEL filter, as before.
+        #
+        # The expander is built only when it would hold something: from Level 3 the default view
+        # filters both rows out, and an empty "Advanced calibration" would promise dials that are
+        # not there. `_param` and `_target_row` both return before touching their container in
+        # that case, so `sb` is never drawn into — it stands in so the two calls can stay
+        # unconditional, which is the contract above.
+        _adv = (sb.expander("Advanced calibration", expanded=False)
+                if _vis("eta") or _vis("alpha") else sb)
+        # THE SELECTBOX IS GONE (D-125, Pavel: the discreteness "just complicates things"). It
+        # existed to make an η → −∞ endpoint selectable; R8 removed Leontief ("Remove Leontief
+        # from the options") and D-122 removed the arbitrary η = −2 stand-in, and with both gone
+        # the choice dimension had nothing left a slider cannot express. What replaces it is an
+        # ORDINARY `_param` dial over the vetted envelope [−1.20, +1.00] at step 0.05 — the right
+        # end being the CES family's own ceiling (σ = 1/(1−η) is negative beyond it), which
+        # `_DIAL_SPEC`'s new `ceil` field holds against R11's padding.
+        #
+        # Both retirements were DIAL changes, not model changes, and stay so: `Params.leontief`
+        # and `_ces_bracket`'s min() branch are the CES family's endpoint and are tested there
+        # (test_alpha_observable's test_03), and η = −2 is still a legal `Params.eta`. The widget
+        # pins the Leontief flag False explicitly, the way it pins τ: `render` promises every
+        # parameter is set with no dataclass fallback. That pin, and the `w_eta` migration below
+        # it, are plain statements in no container at all — the fold holds the two ROWS, and
+        # nothing else in this block is inside anything.
+        #
+        # A session carried over from before this change holds a STRING in `w_eta` (an option
+        # label like "1 (weighted avg)"), which a slider cannot mount. It is cleared before the
+        # widget instantiates, the same way `state.level()` clamps a retired level.
+        for _k in ("w_eta", "sv_eta"):
+            if not isinstance(S.get(_k, 0.0), (int, float)):
+                S.pop(_k, None)
+        S.pop("_eta_mem", None)      # the retired label memo; the sv_ shadow serves this now
+        d["leontief"] = False
+        _param(_adv, "eta", "$\\eta$  CES exponent (compute–labor)", *dial("eta"))
+        _eta_disp = f"{d['eta']:.2f}".rstrip("0").rstrip(".")   # "0" / "0.61" / "-1.2", for α
+        # α sits directly beneath η because they are the two halves of one bracket: η says how
+        # substitutable the inputs are, α how much weight the compute one carries. D-098 dials α
+        # through the OBSERVABLE (the drag), not the weight, so that holding the drag fixed while
+        # η moves counts the bottleneck evidence exactly once. That pairing is why D-135 folds the
+        # two together rather than splitting them across the fold.
+        # VIEW-ONLY contract (D-065): the level filter hides the ROW, never changes the model
+        # input. So d["alpha"] is assigned on every path -- _target_row serves the sv_ shadow
+        # when it is filtered out, exactly as the eta row writes d["eta"] outside its own _vis
+        # guard. Gating the assignment instead silently dropped the key from d and test_ui's
+        # tab-independence check caught it.
+        # Gated on the PARAMETER key, not the observable's key: `_vis` reads
+        # `sidebar_filter_keys`, which is derived from `subsection_param_entries`, and that table
+        # is keyed by parameter throughout (t_compute_x is gated by g_C0 the same way). Gating on
+        # "loss_half_gC" made this row unreachable in the default Level-2 view — D-098 follow-up.
+        #
+        # ROUTED THROUGH `_tparam` (audit A/6, FM-5). R8 removed the Leontief fork above, and with
+        # it the disabled placeholder slider that fork rendered — a widget keyed
+        # `w_loss_half_gC_leontief`, seeded at 50.0, above its own vetted envelope (then [22, 45]). What
+        # is left is the ordinary target row, and it now goes through the SAME path every other
+        # observable takes. Before this it called `m.alpha_from_loss` INLINE, so loss_half_gC never
+        # entered `tg` and never reached the one `_invert()` below, even though `m.invert_targets`
+        # has carried the branch since D-098 — two implementations of one inversion, and the row
+        # was the only target with no ⇒ caption. It gains one, and the caption names the active η:
+        # D-098's headline property is that the delivered α MOVES with the substitution setting
+        # (the shipped 38.44% drag delivers α = 0.70 at the base η = 0, 0.74 at η = 0.61 and
+        # 0.77 at η = 1), and the widget was showing nothing that moved.
+        _tparam(_adv, "loss_half_gC", "alpha",
+                lambda a: (f"⇒ $\\alpha$ = {a:.2f} at $\\eta$ = {_eta_disp} — the weight the "
+                           "model delivers for the drag you stated; it moves with $\\eta$, so "
+                           "the bottleneck evidence is counted once"),
+                lambda a, b: (f"⇒ $\\alpha \\in$ [{a:.2f}, {b:.2f}] at $\\eta$ = "
+                              f"{_eta_disp}"))
+        # (3) THE COST BLOCK HAS NO LEVEL-2 RIDER. B_t = 10^{c^L_t}·10^{−g_p t} at every level,
+        # and its one dial g_p lives at Level 1. Until D-127 the build lag ℓ rendered here under
+        # a "training paid in advance" subheader; removing it is why the Level-2 story is now
+        # THREE blocks rather than four (D-123 addendum, and equations.py's caption).
         # (4) value rider (D-083):  w'(x) = S(x; ν, ν_∞, x_mid)  →  ν_∞ + the transition
         # midpoint x_mid (ν is a Basics dial; the ceiling W̄ is retired)
         if _vis("x_mid", "nu_inf", "p0_w"):
             sb.subheader("Dynamics — the value slope eases")
-        _tparam(sb, "t_value_inf_x", "nu_inf",
-                lambda x: (f"⇒ $\\nu_\\infty$ = {x:.2f} value-OOM per OOM · value growth "
-                           f"$g_W$: {d['nu'] * (_gc_today + d['g_a']):.2f} OOM/yr today → "
-                           f"{x * (d['g_C_inf'] + d['g_a']):.2f} asymptotically (at today's "
-                           "algo rate)"),
-                lambda a, b: f"⇒ $\\nu_\\infty \\in$ [{a:.2f}, {b:.2f}] value-OOM per OOM")
+        # D-120: the dial is the LONG-RUN value growth rate, in ×/yr since D-133, inverted through the
+        # leader's capability speed at the horizon endpoint — the last speed the model states
+        # (past T the ψ feedback diverges, so there is no true asymptote to read). The caption
+        # names that denominator explicitly, because it is the one genuinely new modelling
+        # commitment behind the dial and the reader cannot check the number without it.
+        _tparam(sb, "t_value_growth_inf", "nu_inf",
+                lambda x: (f"⇒ $\\nu_\\infty$ = {x:.2f} value-OOM per OOM (×{10.0**x:.2f} per "
+                           f"OOM) — at the horizon's frontier speed $\\dot x^L_T$ = "
+                           f"{_xdotT:.2f} OOM/yr, down from {_xdot0:.2f} today"),
+                lambda a, b: (f"⇒ $\\nu_\\infty \\in$ [{a:.2f}, {b:.2f}] value-OOM per OOM "
+                              f"(×{10.0**a:.2f}–×{10.0**b:.2f} per OOM)"))
         # D-111: ν (Basics) and ν_∞ (above) are this curve's endpoints; the bend's midpoint and
         # position are advanced — and its OWN button, independent of the compute curve's.
         _adv_button(sb, "value", "easing midpoint and how far into it we are today")
@@ -725,13 +786,21 @@ def render(LEVEL):
     # dialled values at every q₀ᶜ and every compute floor, because the residual and the lag
     # conversion finally see the Dynamics dials that the group below Basics writes.
     #
-    # Seeds. `apply_level_pins` ties g_c∞ := g_c and ν_∞ := ν at Level 1, so the base needs those
-    # two before the inversion runs. Both seeds are EXACT, not approximations — each is literally
-    # what the inversion returns: ν is log10 of its dial, and since D-088 so is g_C0, at every
-    # level and whether or not the floor is tied. From Level 2 the pins touch neither and the
-    # targets supply both anyway.
+    # Seeds. `apply_level_pins` ties g_c∞ := g_c at Level 1, so the base needs g_C0 before the
+    # inversion runs — and that seed is EXACT, not an approximation: it is literally what the
+    # inversion returns, since D-088 made the compute inversion the identity map. From Level 2
+    # the pin touches it not at all and the target supplies it anyway.
+    #
+    # D-120: the OTHER Level-1 tie, ν_∞ := ν, can no longer be seeded this way. ν is now the
+    # log₁₀ of the value dial's ×/yr rate over the leader's exact t = 0 speed, which needs the Dynamics
+    # context and the inverted g_a — precisely what pass 2 exists to supply — so seeding it here
+    # would be a second, approximate copy of the inversion, and a tie made from it would leave a
+    # faint value easing in Level 1's supposedly-exponential paths. The seed below is a
+    # PLACEHOLDER (nothing `invert_targets` reads depends on ν or ν_∞: no capability rate, no lag,
+    # no catch-up intensity), and the real tie is `apply_post_inversion_pins`, below the
+    # inversion.
     d["g_C0"] = float(np.log10(tg["t_compute_x"]))
-    d["nu"] = float(np.log10(tg["t_value_x"]))
+    d["nu"] = P0.nu
     apply_level_pins(d, LEVEL)
     _merged = merged_delta(LEVEL)
     _basep = m.Params(**d)
@@ -748,12 +817,20 @@ def render(LEVEL):
     # freedom), and revenue(0) = m·R₀ and cost(0) = k·R₀ hold exactly at every level. Dials
     # shape the trajectory only FORWARD of t = 0.
     d.update(_invert())
+    # D-120: the Level-1 value tie, applied to the INVERTED ν (see the seed note above).
+    apply_post_inversion_pins(d, LEVEL)
 
     # ========================================================= PASS 3 — the deferred captions
     # Each ⇒ caption writes back into its own row container, so the DOM order inside a row is
     # unchanged (caption last, after the trim lane). `_gc_today` is the model's own Γ(0) —
     # today's realised compute growth — which several captions read.
     _gc_today = m.gc_today(m.Params(**d))
+    # D-120: the two capability speeds the value dials convert through — today's (closed form)
+    # and the horizon endpoint's (simulated), both read off the FINAL effective parameters, so
+    # the captions quote the denominator the inversion actually used.
+    _effp = m.Params(**d)
+    _xdot0 = m.xdot_L0(_effp)
+    _xdotT = m.xdot_L_T(_effp)
     for _row, _fn in _caps:
         _row.caption(_fn())
     if _lag_row is not None:

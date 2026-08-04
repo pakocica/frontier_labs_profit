@@ -12,7 +12,7 @@ import numpy as np
 from dataclasses import replace
 
 from model_dynamics import (
-    _logistic, _softplus, algo_growth_F, algo_growth_L, c_L_closed, compute_growth,
+    _logistic, _softplus, algo_growth_F, algo_growth_L, compute_growth,
     follower_compute_growth, gamma_shape, psi_boost_share,
 )
 
@@ -35,8 +35,9 @@ def w_log(x, p):
     D-088 CORRECTION: nu is w'(0), literally TODAY'S value slope. It used to be the PRE-easing
     plateau, so a user dialling "2.1x per OOM" got 2.089x today -- the dial lying by 0.7%, the
     same defect D-086 fixed on the compute path and did not reach here. nu is calibrated as a
-    today-observable (TV1'), and invert_targets has always read it as one (nu = log10(t_value_x)),
-    so the curve is what was wrong. gamma_shape derives the plateau; the closed form below is the
+    today-observable (TV1'), and invert_targets has always read it as one, so the curve is what
+    was wrong. (D-120 re-keyed the DIAL behind it from x/OOM to the value growth rate, x/yr since D-133;
+    nu itself is unchanged, and so is everything below.) gamma_shape derives the plateau; the closed form below is the
     softplus integral of that curve, exactly as c_L_closed; the w(0) = 0 anchor IS the D-077
     index anchor."""
     x = np.asarray(x, dtype=float)
@@ -66,6 +67,70 @@ def W(x, p):
         Wbar = 1.0 + np.exp(lg)
         return _logistic(x, 0.0, Wbar, p.x_mid, p.nu)
     return np.exp(np.clip(np.log(10.0) * w_log(x, p), -700.0, 700.0))
+
+# --------------------------------------------------------------------------------------------
+# D-132 (Pavel, 2026-08-03, XM5) -- THE VALUE BLOCK'S ONE INTERNAL CROSS-CHECK.
+#
+# Read p0_w under the BOUNDED-MARKET structure and it stops being a free shape dial. Suppose
+# value is proportional to the share A(x) of a bounded addressable market -- the natural
+# formalisation of "AI's automatable value saturates" -- and let A be logistic in x, the family
+# Gamma already imposes. Then w = log10 A + const gives w'(x) = s_A(1 - A(x)), which IS Gamma
+# with nu_inf = 0, f == A and x_mid = x_A. Two identities fall straight out:
+#
+#     x_mid = lam(p0_w) * (1 - p0_w/100) / nu       and       M = W(inf)/W(0) = 100/p0_w
+#
+# so p0_w is literally "the percent of AI's total addressable value that today's frontier
+# already captures", and the single ratio M pins BOTH value-transition dials at once. The pair
+# is therefore over-determined, and until now nothing in the code noticed when it was
+# over-determined INCONSISTENTLY: the shipped (x_mid = 10, p0_w = 1%) implied W(inf)/W(0) =
+# 1853x while p0_w's own reading asserts 100x -- an 18.5-fold contradiction on the two dials the
+# paper calls decisive. At the ratified spot 6.0 the same pair implies 91.4x against 100x, a
+# 1.09x disagreement: the calibration is now coherent on its own terms, which is a property the
+# old one could not claim and is a real part of the case for 6.0.
+#
+# IT IS A WARNING, NOT AN ERROR, and the distinction is load-bearing. The identity binds only
+# under the bounded-market reading; with nu_inf > 0 there is no ceiling at all, so a user running
+# the "Amodei steelman" structure (nu_inf granted at 10 %/yr, x_mid free) is not doing anything
+# wrong by tripping it. The two structures are incompatible by construction and that is a
+# feature. What the check buys is that a reader who believes the bounded-market story can see, on
+# the dial, when the numbers stop telling it.
+COHERENCE_TOL_OOM = 0.5   # half an order of magnitude between the two readings of W(inf)/W(0)
+
+
+def implied_value_multiple(p):
+    """W(inf)/W(0) implied by (x_mid, p0_w, nu) read as a bounded market -- i.e. at nu_inf = 0,
+    whatever nu_inf the dial actually holds. Closed form, no integration:
+
+        w(inf) - w(0) = y_{-inf} * x_mid * (2 - log10 q) / lam(q),   q = p0_w in percent,
+
+    with y_{-inf} = nu / (1 - q/100) the nu_inf = 0 plateau and lam = log10((100-q)/q). The
+    (2 - log10 q) factor is lam + log10(1 + 10^-lam) collapsed; it is exact, not a fit."""
+    q = float(p.p0_w)
+    lam = np.log10((100.0 - q) / q)
+    y_minus_inf = float(p.nu) / (1.0 - q / 100.0)
+    dw = y_minus_inf * float(p.x_mid) * (2.0 - np.log10(q)) / lam
+    return float(np.exp(np.clip(np.log(10.0) * dw, -700.0, 700.0)))
+
+
+def coherent_x_mid(p):
+    """The x_mid at which the two readings of W(inf)/W(0) agree exactly, at this nu and p0_w:
+    x_mid = lam(p0_w)*(1 - p0_w/100)/nu. 6.1202 at the ratified nu and p0_w = 1%."""
+    q = float(p.p0_w)
+    return float(np.log10((100.0 - q) / q) * (1.0 - q / 100.0) / float(p.nu))
+
+
+def value_coherence(p):
+    """(implied, asserted, gap_in_OOM, ok) for the bounded-market cross-check above.
+
+    `ok` is False when the two readings differ by more than COHERENCE_TOL_OOM, which is the
+    ONE judgement in the check and is documented rather than tuned: half an OOM is wide enough
+    that the ratified spot (0.04 OOM out) is silent and narrow enough that the retired default
+    (1.27 OOM out) is not. In x_mid units at p0_w = 1% the quiet band is [4.59, 7.65]."""
+    implied = implied_value_multiple(p)
+    asserted = 100.0 / float(p.p0_w)
+    gap = float(np.log10(implied / asserted))
+    return implied, asserted, gap, bool(abs(gap) <= COHERENCE_TOL_OOM)
+
 
 def W_exp_approx(x, p):
     """Exponential-regime form of the index: 10^{nu x} (the x << x_mid limit of W). Spec I.3."""
@@ -105,47 +170,43 @@ def conduct_mult(gap, p):
 
 
 # ------------------------------------------------------------------ Component C -- cost flow
-def cost_flow(t, c_L_at, c_L_ell, p):
+def cost_flow(t, c_L_at, p):
     """Leader model-building cost flow, IN MULTIPLES OF TODAY'S BILL. Spec I.4 / N3. D-093
     normalises D-090's re-based form by its own t = 0 value:
 
-        B_t = 10^{c_L(t+ell) - c_L(ell)} * 10^{-g_p t},        B_0 = 1 identically.
+        B_t = 10^{c_L(t)} * 10^{-g_p t},        B_0 = 1 identically.
 
-    c_L_at = c_L(t+ell). The firm still pays today for the compute of the model shipping at t+ell
-    (ANCHOR, D-036 4th amendment). What D-093 removed is the stored constant in front: D-090 had
-    already made it the OBSERVABLE k*R0 = $75B, and dividing the whole block through by that
-    observable is what lets the finance side carry one parameter (rho) instead of four.
+    c_L_at = c_L(t). What D-093 removed is the stored constant in front: D-090 had already made
+    it the OBSERVABLE k*R0 = $75B, and dividing the whole block through by that observable is
+    what lets the finance side carry one parameter (rho) instead of four.
+
+    B_0 = 1 IS BITWISE, unconditionally. c_L(0) = 0 exactly, so there is nothing to divide out.
+    (Until D-127 the path was referenced to c^L(ell) for a build lag ell, computed from the exact
+    integral c_L_closed(ell) while the caller read c^L(t+ell) off the RK4 grid by interpolation.
+    That two-step arithmetic -- and its 5-to-260 ulp budget, and the paragraph defending it --
+    went with ell. Do not reintroduce a de-lagging constant here without reinstating the budget.)
+
+    THE COST ANCHOR IS THE OBSERVED BILL -- compute AND R&D / researcher overhead together, which
+    move roughly proportionally (SB1). This is why no separate R&D markup exists: one would
+    DOUBLE-COUNT what the anchor already contains, and none is calibrated. phi_RD used to encode
+    that markup, pinned at 0 and provably inert (its (1+phi_RD) factors cancelled structurally
+    here); D-126 retired it outright and this comment is where its rationale now lives. A revival
+    would have to re-spec it as the NON-DEFLATING leg -- wages do not fall at g_p -- which is spec
+    N10, and precisely why the retired version was inert and a live one would not be.
 
     THE UNITS ARE THE POINT. Cost is no longer $B/yr; it is "times what the leader spends on
     model-building this year". Coverage rho_t = E_t/B_t is unchanged in meaning and value --
     both legs were rescaled by the same k*R0 -- while profit Pi_t = E_t - B_t becomes
     dimensionless. Nothing here can be read as a dollar figure any more, deliberately.
 
-    WHY THE TWO-STEP ARITHMETIC BELOW -- do not "simplify" it to 10.0**(c_L_at - cl - g_p*t).
-    Two constraints it encodes that the collapsed form does not:
-      * the de-lagging uses c_L_closed(p.ell, p), the EXACT integrated compute path (Pavel,
-        2026-07-26), and deliberately NOT the c_L_ell argument, which simulate obtains by
-        INTERPOLATION on the RK4 grid and which therefore differs in the last few digits. The
-        argument is kept because it is what the caller has, and because the difference between
-        the two is exactly the sort of thing a future edit would otherwise "tidy" into a
-        discrepancy;
-      * (1 + phi_RD) appears in both places so that its cancellation is STRUCTURAL rather than
-        assumed -- test_22 pins that phi_RD is inert, and it stays inert by construction here.
-    Ordering also still matters numerically: D-090 measured the collapsed form moving the path
-    2-3 ulp at the shipped ell = 0.45, because (X/10^a)*10^b and X*10^(b-a) round differently.
-
     WHAT THE USER SETS (D-076, SB1/SB-R; D-093): nothing on this leg. The bill's LEVEL is the
     normaliser, so the only finance dial left is rho -- coverage at t = 0. Consequences worth
     knowing:
-      * moving ell or the slowdown re-anchors nothing -- an observation cannot depend on a
-        parameter, and B_0 is now the constant 1 rather than a number re-derived to stay
-        consistent;
-      * in the BASE model ell = 0 and phi_RD = 0, so the whole cost side is the compute path
-        10^{c_L(t)} deflated by falling prices 10^{-g_p t}, growing at 10^{g_C0 - g_p} = 2.35x/yr.
-    phi_RD > 0 (a retired extension) re-splits the same normalised bill into a compute leg and an
-    overhead leg; it cancels identically here, which is what test_22 pins."""
-    scale = 1.0 / ((1.0 + p.phi_RD) * 10.0**float(c_L_closed(p.ell, p)))
-    base = (1.0 + p.phi_RD) * scale * 10.0**(c_L_at - p.g_p * t)   # D-039: g_p in OOM/yr
+      * moving the slowdown re-anchors nothing -- an observation cannot depend on a parameter,
+        and B_0 is the constant 1 rather than a number re-derived to stay consistent;
+      * the whole cost side is the compute path 10^{c_L(t)} deflated by falling prices
+        10^{-g_p t}, growing at 10^{g_C0 - g_p} = 2.35x/yr in the base."""
+    base = 10.0**(c_L_at - p.g_p * t)   # D-039: g_p in OOM/yr
     if p.own_mode:
         # II.6 (provisional): Jorgenson user cost u = p_K (r + delta_K + g_p); competitive-rental
         # equivalent has price r + g_p, so owners additionally bear delta_K/(r+g_p). SIMPLIFIED:
@@ -162,9 +223,9 @@ def cost_flow(t, c_L_at, c_L_ell, p):
 # exact. The **leader is autonomous** (its dynamics depend on neither the follower nor $x^R$), so
 # it is integrated first on a half-step fine grid; the follower is then integrated on the coarse
 # grid, reading the leader path off the fine grid *by index* rather than by interpolation, since
-# every RK4 stage falls exactly on a fine-grid node. The state is integrated past the horizon —
-# by at least 1.5 yr, more when the build lag $\ell$ is long — so `cost_flow` can read
-# $c^L_{t+\ell}$ for every displayed $t$; outputs are then truncated to $[0, T]$.
+# every RK4 stage falls exactly on a fine-grid node. The state is integrated 1.5 yr past the
+# horizon so the truncation to $[0, T]$ and the follower-grid invariant have room; outputs are
+# then truncated to $[0, T]$.
 #
 # The release-delay machinery ($x^R$, `_xR_of`, the $\tau$ sweep) is **parked and pinned at
 # $\tau = 0$** (D-077, spec N9), where $x^R \equiv x^L$; it is kept intact so question (b) can be
@@ -219,21 +280,71 @@ def _rk4_follower_fine(coarse, aL_fine, xR_fine, gCF_fine, p):
         cF[i+1] = c + h/6*(k1c + 2*k2c + 2*k3c + k4c)
     return aF, cF
 
+def _sim_pad(p):
+    """How far PAST the horizon `simulate` integrates.
+
+    The pad exists so that truncating the output to [0, T] and the follower integrator's grid
+    invariant (len(fine) == 2*len(grid) - 1) both have room. It is now the constant 1.5 yr.
+    (History: until D-127 it was max(1.5, ell + 2*dt), because the cost leg read c_L(t+ell) and a
+    short pad let that interpolation clamp at the grid end -- freezing the compute factor while
+    10^{-g_p t} kept falling, giving a spurious cost kink at t = T - (ell - pad), Pavel's bug
+    report 2026-07-23. With ell gone the lookup is c_L(t) and the kink is structurally
+    impossible. Kept as a function -- rather than inlined -- because D-120 factored it out so
+    `leader_horizon_state` and `simulate` build THE SAME grid from one rule.)"""
+    return 1.5
+
+
+def leader_horizon_state(p):
+    """(t_T, x) -- a pair SUFFICIENT TO EVALUATE xdot^L(T), read off the same RK4 integration
+    `simulate` runs. t_T is simulate's own last displayed node (grid[-1] of the truncated output),
+    which is T up to the dt grid.
+
+    THE CONTRACT IS THE SPEED, NOT THE CAPABILITY -- read this before using `x`. On the general
+    path `x` IS x^L(t_T), bit for bit. In the three short-circuit branches below (A1, gamma = 0,
+    beta0 = 0) the speed is a closed form that does not read x^L at all, so no path is integrated
+    and `x` is returned as a SENTINEL 0.0. Do NOT validate x^L(T) against this function, and do
+    not read the `leader_horizon_state` field in `port_fixtures/calibration.json` as a capability:
+    8 of its 24 scenarios carry the sentinel. `simulate(p)['x_L'][-1]` is the capability.
+
+    D-120: `invert_targets` needs xdot^L(T) to convert the asymptotic value dial's x/yr into
+    nu_inf, and the honest reading of "the leader's speed at the horizon" is the SIMULATED one --
+    the psi feedback makes adot_L depend on the capability the leader has actually reached. There
+    is NO circularity: the leader's path depends on the compute and algorithmic legs only, never
+    on nu or nu_inf, so the capability path is computed first and the value leg inverted after it.
+
+    WHY THIS IS NOT JUST `simulate(p)['x_L'][-1]`. On the general path it is exactly that number
+    -- asserted bitwise in test_model, which honestly excludes the short-circuit branches -- but
+    reached without integrating the follower, the value index or the cost
+    leg, none of which the speed reads. The grid is built by simulate's own rule (`_sim_pad`),
+    and fixed-step RK4 forward from t = 0 makes every node depend only on the nodes before it,
+    so truncating the fine grid at the horizon cannot move a bit.
+
+    TWO EXACT SHORT-CIRCUITS, not approximations. The integration exists only to find the
+    capability x^L(T) the psi ratio psi(x)/psi(0) reads. Under A1 the bracket is short-circuited
+    and adot_L == g_a at every x; with gamma = 0 or beta0 = 0 the ratio is identically 1 at every
+    x. In both cases the speed is a closed form and any x reproduces it, so no path is integrated
+    (which is also what keeps Level 1 -- the A1 level -- free of the extra cost)."""
+    n_steps = int(np.ceil((float(p.T) + _sim_pad(p)) / float(p.dt)))
+    grid = float(p.dt) * np.arange(n_steps + 1)
+    i_T = int(np.flatnonzero(grid <= float(p.T) + 1e-9)[-1])
+    if p.A1 or p.gamma == 0.0 or p.beta0 == 0.0:
+        return float(grid[i_T]), 0.0          # adot_L does not read x^L -- see the docstring
+    fine = 0.5 * float(p.dt) * np.arange(2 * i_T + 1)
+    aL, cL = _rk4_leader_fine(fine, p)
+    return float(grid[i_T]), float(aL[-1] + cL[-1])
+
+
 def simulate(p, tau_fn=None):
     """Integrate the full system and return time series on [0, T]. Spec I.0-I.5.
-    Internally integrates PAST the horizon so cost_flow can read c_L(t+ell) for every displayed
-    t <= T; outputs truncated to T."""
-    # The pad must COVER the training lead ell (slider allows up to 3 yr): with a fixed pad the
-    # c_L(t+ell) interpolation silently clamped at the grid end, freezing the compute factor while
-    # 10^{-g_p t} kept falling -> a spurious cost peak/decline kink at t = T - (ell - pad)
-    # (Pavel's bug report 2026-07-23, horizon 5 / ell 3 -> kink at 3.5). 1.5 stays as the floor.
-    pad = max(1.5, float(p.ell) + 2.0 * float(p.dt))
+    Internally integrates PAST the horizon (see `_sim_pad`); outputs truncated to T."""
+    pad = _sim_pad(p)
     # Grids are built from an INTEGER step count, not from arange endpoints, so the invariant the
     # follower integrator relies on -- len(fine) == 2*len(grid)-1, with fine node 2i EXACTLY on
-    # coarse node i -- holds for every (T, dt, ell). (Bug found 2026-07-27: with arange endpoints,
-    # an ell whose T+pad+dt/2 landed just above a multiple of dt gave the coarse grid one extra
-    # node, the `fine[:2n-1]` slice became a no-op, and _rk4_follower_fine ran off the end. It was
-    # masked only because every ell ever drawn or dialled was a round number.)
+    # coarse node i -- holds for every (T, dt). (Bug found 2026-07-27 through the then-variable
+    # pad: with arange endpoints, a T+pad+dt/2 landing just above a multiple of dt gave the coarse
+    # grid one extra node, the `fine[:2n-1]` slice became a no-op, and _rk4_follower_fine ran off
+    # the end. The pad is constant since D-127, but the invariant is independent of that and the
+    # integer step count is what protects it.)
     n_steps = int(np.ceil((float(p.T) + pad) / float(p.dt)))
     grid = float(p.dt) * np.arange(n_steps + 1)              # coarse grid, step dt
     fine = 0.5 * float(p.dt) * np.arange(2 * n_steps + 1)    # fine grid, step dt/2
@@ -268,10 +379,7 @@ def simulate(p, tau_fn=None):
     revenue = coef * cond * gapW
     revenue = revenue * (1.0 - 0.4 * p.chi)      # II.5: defense costs 0.4*chi of earnings
 
-    # cost: c_L(t+ell) via interpolation; c_L(ell) constant
-    cL_ell = float(np.interp(p.ell, grid, cL))
-    cL_at = np.interp(grid + p.ell, grid, cL)    # t+ell within padded grid for t<=T
-    cost = cost_flow(grid, cL_at, cL_ell, p)
+    cost = cost_flow(grid, cL, p)                # cost reads the compute path at t itself
 
     profit = revenue - cost
     if p.labor_line:                             # II.7 decoupled labor line

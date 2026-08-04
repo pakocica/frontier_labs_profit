@@ -15,9 +15,10 @@ from dataclasses import replace
 
 from model_params import Params
 from model_dynamics import (
-    algo_growth_L, alpha_from_loss, follower_compute_growth, gc_today, loss_from_alpha,
+    algo_growth_L, alpha_from_loss, compute_growth, follower_compute_growth, gc_today,
+    loss_from_alpha,
 )
-from model_profit import gap_index, simulate
+from model_profit import gap_index, leader_horizon_state, simulate
 
 
 # D-093: `gap_index` MOVED to the value block -- simulate calls it now, so it belongs beside W
@@ -49,6 +50,82 @@ def xdot_L0(p):
     (Defined ahead of target_defaults, which calls it at import time through _TD0.)"""
     return float(gc_today(p) + algo_growth_L(0.0, 0.0, p))
 
+
+_XDOT_T_CACHE: dict = {}
+
+def xdot_L_T(p):
+    """The leader's capability speed at the HORIZON ENDPOINT t = T (D-120), the denominator the
+    ASYMPTOTIC value dial converts through:
+
+        xdot^L(T) = g_C(T) + adot_L(T, x^L(T)),   with x^L(T) SIMULATED.
+
+    WHY T AND NOT A TRUE ASYMPTOTE. Past the horizon the psi feedback diverges (spec N4), so
+    "the long-run capability speed" has no limit to read; the horizon endpoint is the last speed
+    the model actually states. At the shipped defaults it is 0.474 OOM/yr (the leader decelerates
+    from 1.055 today as the compute slowdown bites, troughing near 0.43 around t = 5 before psi
+    lifts it back).
+
+    THE ORDERING THIS IMPOSES, and why it is not circular: the leader's path is a function of the
+    compute and algorithmic legs alone -- nu and nu_inf enter nowhere in it -- so `invert_targets`
+    settles the capability legs FIRST and reads this afterwards. Reversing the two would be the
+    circularity, and the function order below is what prevents it.
+
+    Memoised on the complete set of fields the leader path depends on, so a Params differing
+    anywhere else (or agreeing here) is correctly treated as identical. The sidebar inverts
+    several times per rerun at one context and hits the cache every time; the Monte Carlo draws a
+    fresh context per draw and misses by construction, which is why `leader_horizon_state`
+    integrates the leader only and short-circuits exactly where the path is not read at all."""
+    key = (p.T, p.dt, p.g_C0, p.g_C_inf, p.t_mid, p.p0_c, p.g_a,
+           p.A1, p.alpha, p.eta, p.leontief, p.beta0, p.gamma)
+    v = _XDOT_T_CACHE.get(key)
+    if v is None:
+        if len(_XDOT_T_CACHE) > 4096:          # bound it: one entry per distinct MC draw
+            _XDOT_T_CACHE.clear()
+        t_T, x_T = leader_horizon_state(p)
+        v = float(compute_growth(t_T, p) + algo_growth_L(t_T, x_T, p))
+        _XDOT_T_CACHE[key] = v
+    return v
+
+
+# D-120: the value dials are stated as GROWTH RATES of value, and converted through the leader's
+# capability speed at the date each one describes -- today for nu, the horizon endpoint for
+# nu_inf. The two helpers below are that conversion, written once and used in both directions so
+# `target_defaults` and `invert_targets` cannot drift apart.
+#
+# D-133 (Pavel, 2026-08-03) RE-KEYED THE UNIT from %/yr to x/yr, for consistency with the compute
+# dials, which all speak x/yr. He agrees %/yr reads more naturally for small growth rates and
+# prefers the consistency; the %/yr correspondence is kept as a side mention on the calibration
+# cards. The map is affine and exact at the integer anchors -- x/yr = 1 + (%/yr)/100 -- so this
+# changes the unit and NOTHING else: nu and nu_inf are bitwise what they were.
+#
+#     m x/yr  ->  slope = log10(m) / xdot^L                (value-OOMs per capability-OOM)
+#     slope   ->  m = 10^{slope * xdot^L}
+#
+# The x/yr form is also the cleaner arithmetic, measured rather than assumed: the retired %/yr
+# forward map ended in 100*(10^y - 1), which near 1.1 could not land on 10.0 at all (the reachable
+# doubles straddling it are 9.999999999999987 and 10.000000000000009), so D-118's rider had to
+# record the asymptotic dial's round trip as 5 ulp. In x/yr the forward map IS 10^y and both legs
+# round-trip EXACTLY: 2.19 and 1.10 come back bitwise.
+#
+# WHY THE OBSERVABLE IS THE RATE (D-118, Pavel). A x/OOM dial states a rate only jointly with a
+# compute path: the shipped x1.25 granted 6.9 %/yr at a slow path, 11.2 % at the default and
+# 19.6 % at a fast one, so "we grant Amodei's 10-20 %/yr" was true at exactly one setting of dials
+# the user is invited to move. Stated as a rate the same growth is granted at EVERY path by
+# construction, which is what makes the paper's adversarial framing checkable rather than
+# conditional on a compute setting the reader never chose.
+_SPEED_FLOOR = 1e-9      # a zero speed is unreachable from any envelope; guard the division only
+_MULT_FLOOR = 1e-12      # ditto for a zero multiplier: log10(0) is -inf, and x1.00 is the floor
+
+def growth_mult_of_slope(slope, speed):
+    """Value growth in x/yr implied by a value slope (per capability-OOM) at a capability speed."""
+    return float(10.0**(float(slope) * float(speed)))
+
+def slope_of_growth_mult(mult, speed):
+    """The inverse: the value slope a x/yr reading implies at a capability speed. Domain
+    mult > 0 (value does not vanish); the shipped envelopes floor at x1.00, i.e. no growth."""
+    return float(np.log10(max(float(mult), _MULT_FLOOR)) / max(float(speed), _SPEED_FLOOR))
+
+
 def target_defaults(p=None):
     """Forward map Params -> target values (exact; round-trips through invert_targets).
 
@@ -65,8 +142,10 @@ def target_defaults(p=None):
         't_eff_x':     float(10.0**speed0),
         't_lag_mo':    float(p.Delta0 / speed0 * 12.0),
         't_price_x':   float(10.0**p.g_p),
-        't_value_x':   float(10.0**p.nu),
-        't_value_inf_x': float(10.0**p.nu_inf),
+        # D-120/D-133: the two value dials are GROWTH RATES in x/yr, each read at the date it
+        # describes -- nu at today's capability speed, nu_inf at the horizon endpoint's.
+        't_value_growth':     growth_mult_of_slope(p.nu, speed0),
+        't_value_growth_inf': growth_mult_of_slope(p.nu_inf, xdot_L_T(p)),
         't_floor_x':   float(10.0**p.g_C_inf),
         # D-098, in PERCENT (the p0_c convention: a percent dial states percent). Under
         # Leontief this reports the 50% the model actually delivers, not the weight's image.
@@ -114,7 +193,8 @@ def stationary_catchup(p, merged=True):
     channels_from_lag's rescaled calibrated defaults; only its LENGTH is re-solved, so the
     split redistributes within the derived total. Consequence: dials shape the trajectory
     only FORWARD of t = 0. BOTH documented residuals here are now gone: D-090 killed S0's
-    movement with the cost-SHAPE dials (ell, t_mid, g_c_inf), which was pure parameterisation
+    movement with the cost-SHAPE dials (t_mid, g_c_inf, and ell until D-127 removed it), which
+    was pure parameterisation
     artefact, and D-093 killed kappa's movement with x_mid -- not by pinning it but by deleting
     it. There is no derived finance constant left to drift, because E_0 = rho and B_0 = 1 are
     identities rather than solutions.
@@ -153,7 +233,18 @@ def invert_targets(targets, base, merged=True):
     merged=True (pure-catch-up levels 1-2, D-081): the lag pins Delta0; the merged delta
     re-derives per configuration as xdot_L0/Delta0 (= 12/lag at the base pins), so the gap
     is STATIC at t = 0 for any dial setting. merged=False (channels, level 3): Delta0 from
-    the lag; (delta_dev, delta_rel) from stationary_catchup (same exactness)."""
+    the lag; (delta_dev, delta_rel) from stationary_catchup (same exactness).
+
+    THE ORDER IS LOAD-BEARING SINCE D-120, and in a new way. Three blocks, in this order:
+      (1) THE CAPABILITY LEGS -- g_C_inf, g_C0, g_a, alpha. Everything the leader's own path
+          depends on. `loss_half_gC` MOVED into this block: alpha enters no t = 0 rate (which is
+          why it used to be documented as order-free) but it does enter adot_L at t > 0, so the
+          horizon speed reads it.
+      (2) THE VALUE LEGS -- nu, nu_inf -- which convert x/yr through the speeds block (1) has
+          just fixed: xdot_L0 (closed form: Gamma(0) + g_a) and xdot_L_T (simulated).
+      (3) THE LAG, which needs the exact t = 0 speed and re-solves the catch-up intensity.
+    There is no cycle to break: no capability rate reads nu or nu_inf, so (1) never needs (2).
+    g_p sits in (1) only because it is order-free and belongs with the other scalars."""
     out = {}
     if 't_floor_x' in targets:
         out['g_C_inf'] = float(np.log10(targets['t_floor_x']))
@@ -174,21 +265,28 @@ def invert_targets(targets, base, merged=True):
         # otherwise produce one. The widget also clamps its slider (GE5).
         gc = gc_today(replace(base, **out))
         out['g_a'] = float(max(np.log10(targets['t_eff_x']) - gc, 0.0))
-    if 't_value_x' in targets:
-        out['nu'] = float(np.log10(targets['t_value_x']))
-    if 't_value_inf_x' in targets:
-        out['nu_inf'] = float(np.log10(targets['t_value_inf_x']))
     if 't_price_x' in targets:
         out['g_p'] = float(np.log10(targets['t_price_x']))
     if 'loss_half_gC' in targets:
-        # D-098. ORDER-FREE, unlike every other inversion here: alpha enters no t = 0 rate
-        # (both CES channels are 1 at t = 0, so adot_L(0) = g_a at every alpha), so this branch
-        # neither reads nor feeds `ref`. It may sit anywhere in this function; it is placed
-        # last among the scalar inversions only for reading order. It DOES read the active eta,
-        # which is a free dial and never a target -- so `base` carries it.
+        # D-098. Order-free at t = 0 -- both CES channels are 1 there, so adot_L(0) = g_a at
+        # every alpha -- but NOT order-free for the horizon speed: adot_L(t) reads alpha at
+        # every t > 0, so D-120 moved this branch up into the capability block, ahead of the
+        # value legs that convert through xdot_L_T. It reads the active eta, a free dial and
+        # never a target, so `base` carries it.
         out['alpha'] = alpha_from_loss(float(targets['loss_half_gC']) / 100.0,
                                        base.eta, base.leontief)
+    # ---- (2) the VALUE legs, converted through the speeds the block above has just fixed.
     ref = replace(base, **out)
+    if 't_value_growth' in targets:
+        # today's value growth, through the leader's EXACT t = 0 speed (closed form: Gamma(0)
+        # + g_a, both already inverted above)
+        out['nu'] = slope_of_growth_mult(targets['t_value_growth'], xdot_L0(ref))
+    if 't_value_growth_inf' in targets:
+        # the long-run rate, through the SIMULATED speed at the horizon endpoint (D-120)
+        out['nu_inf'] = slope_of_growth_mult(targets['t_value_growth_inf'], xdot_L_T(ref))
+    # ---- (3) the lag. `ref` is refreshed with the value legs for hygiene: nothing below reads
+    # nu or nu_inf today, and a future mechanism that does must not silently see the base's.
+    ref = replace(ref, **{k: out[k] for k in ('nu', 'nu_inf') if k in out})
     if 't_lag_mo' in targets:
         lag_mo = float(targets['t_lag_mo'])
         lag_yr = lag_mo / 12.0
@@ -231,12 +329,13 @@ def split_delta(delta_total):
 # ui/levels.apply_level_pins does at Level 1.
 def base_params(**kw):
     """The calibrated BASE model: constant compute growth, constant residual g_a, exponential
-    value, merged catch-up, no build lag, no R&D markup on top of the observed bill. This is the
-    Level-1 model the calibration round closed on 2026-07-26."""
+    value, merged catch-up. This is the Level-1 model the calibration round closed on 2026-07-26.
+    (It used to pin two further extensions, the build lag ell and the R&D markup phi_RD, both at
+    0; D-127 removed them from the model, so there is nothing left to pin.)"""
     # (D-088: g_C0 is no longer pinned here. It IS G_C_TODAY -- the dataclass default states
     # today's growth directly, so the old explicit pin, which existed only to undo D-086's
     # plateau-valued default, has nothing left to undo.)
-    pins = dict(A1=True, gamma=0.0, ell=0.0, phi_RD=0.0, x_mid=200.0, tau=0.0,
+    pins = dict(A1=True, gamma=0.0, x_mid=200.0, tau=0.0,
                 g_a_F=0.0, g_CF0=0.0, g_CF_inf=0.0, split=0.0)
     pins.update(kw)          # explicit overrides win, so a caller may probe e.g. x_mid
     p = Params(**pins)
@@ -250,7 +349,9 @@ def base_params(**kw):
 _PB = base_params()
 assert np.isclose(_PB.g_C0 + _PB.g_a, 1.0546130545568877, rtol=1e-12)   # speed 11.34 x/yr
 assert np.isclose(_PB.Delta0, 0.6151909484915179, rtol=1e-12)           # 7.0-month lag
-assert np.isclose(gap_index(_PB), 0.3664606328362475, rtol=1e-12)       # the value gap, in index units
+# D-118 rider (2026-08-02): re-fitted with nu, which is now the image of the round rate x2.19/yr
+# rather than of x2.1/OOM (0.3664606328362475 before -- the gap rides nu and nothing else moved).
+assert np.isclose(gap_index(_PB), 0.36699433065482256, rtol=1e-12)      # the value gap, in index units
 # D-093: the two stale-literal guards on kappa and B0 are GONE WITH THE FIELDS. Nothing here
 # needs re-fitting when a default moves -- E_0 = rho and B_0 = 1 are identities, and the two
 # asserts below check them on the model's OWN forward path rather than on a stored constant.

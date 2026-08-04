@@ -20,9 +20,12 @@ from collections import namedtuple
 
 # ---------------------------------------------------------------- Component A -- frontier progress
 #
-# The CES exponent $\eta$ is the substitution reading: $\eta = 1$ (the D-018 base) makes the two
-# research inputs near-substitutes, so the bracket is a weighted **average** and a compute
-# slowdown barely dents algorithmic progress; $\eta \to 0$ is Cobb–Douglas; $\eta < 0$ makes them
+# The CES exponent $\eta$ is the substitution reading, and it is a continuous dial (D-125) over
+# $[-1.20, +1.00]$: $\eta = 0$ — **the base** — is Cobb–Douglas, the RSI literature's own
+# convention, where the bracket is the geometric mean $R_\psi^{1-\alpha} R_{gc}^{\alpha}$ and
+# $\alpha$ is exactly identified by the compute cost share; $\eta = 1$ (D-018's superseded
+# simplification) makes the two research inputs perfect substitutes, so the bracket is a weighted
+# **average** and a compute slowdown barely dents algorithmic progress; $\eta < 0$ makes them
 # complements; `leontief=True` is the $\eta \to -\infty$ limit, where the scarcer input rules.
 #
 # **Caveat (N4).** With $\gamma > 0$ the $\psi$ feedback makes the law formally super-exponential.
@@ -239,12 +242,13 @@ def alpha_from_loss(loss, eta, leontief=False):
         1 - loss = [ (1-alpha) + alpha * 2^{-eta} ]^{1/eta}    =>    (1-loss)^eta
                  = 1 - alpha (1 - 2^{-eta}),
 
-    which inverts in closed form. At the base eta = 1 this is simply loss = alpha/2, so the
-    ratified spot alpha = 0.70 IS the 35% dial. The eta -> 0 branch is the Cobb-Douglas limit
-    1 - loss = 2^{-alpha}. The threshold below is `_ces_bracket`'s OWN 1e-8, deliberately: any
-    other value would make the dial and the model disagree in a band around eta = 0.
+    which inverts in closed form. At the base eta = 0 (D-125) this is the Cobb-Douglas limit
+    1 - loss = 2^{-alpha}, so the ratified spot alpha = 0.70 IS the 38.44% dial; at the
+    superseded eta = 1 it was simply loss = alpha/2 and the same alpha read 35%. The threshold
+    below is `_ces_bracket`'s OWN 1e-8, deliberately: any other value would make the dial and the
+    model disagree in a band around eta = 0.
 
-    Two properties make one slider work across the whole eta menu: loss = 0 <=> alpha = 0 and
+    Two properties make one slider work across the whole eta range: loss = 0 <=> alpha = 0 and
     loss = 50% <=> alpha = 1 at EVERY eta, and alpha is strictly increasing in loss in between.
     So the observable's natural domain is (0, 50%) and it can never produce an alpha outside
     (0, 1). Holding the OBSERVABLE fixed while eta moves is the point: the drag is what the
@@ -324,9 +328,12 @@ def c_L_closed(t, p):
 
         c^L(t) = g_c^pre*t + (g_C_inf - g_c^pre)*[softplus(k(t-t_mid)) - softplus(-k*t_mid)]/k.
 
-    Used by cost_flow (model_profit) to de-lag the normalised bill through the exact integrated
-    path c^L(ell), never a g_C*ell linearization (Pavel, 2026-07-26: "use c(t+l), not
-    g_C(t+l), as the growth might vary between t and t+l"). Agrees with simulate()'s RK4 path to
+    The reference implementation of the compute path: simulate() integrates the same path by RK4
+    and the cost leg reads it, while the capture harnesses and test_19 use this closed form to
+    check that integration. (Until D-127 cost_flow also called it directly, to de-lag the
+    normalised bill through the exact integral c^L(ell) rather than a g_C*ell linearization --
+    Pavel, 2026-07-26: "use c(t+l), not g_C(t+l), as the growth might vary between t and t+l".
+    That use went with ell; the function did not.) Agrees with simulate()'s RK4 path to
     integrator precision; in the base (g_C_inf = g_C0, constant growth) gamma_shape returns the
     plateau EXACTLY equal to g_C0, so the bracket multiplies zero and c^L(t) = g_C0*t exactly."""
     t = np.asarray(t, dtype=float)

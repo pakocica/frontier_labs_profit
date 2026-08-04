@@ -109,7 +109,8 @@ def inject_base_css():
 
 # ======================================================================= plotly helper
 # ---- calendar time axis (D-076; Pavel's "one important decision", 2026-07-26) ----------------
-# t = 0 is early 2026 (spec N1), and the whole model is calibrated TO 2026 — so every time axis
+# t = 0 is mid-2026 (D-104's anchor convention; spec N1 amended to it), and the whole model is
+# calibrated TO 2026 — so every time axis
 # shows CALENDAR YEARS (2026 … 2031/2036), never 0–5/0–10. Model time stays the internal unit;
 # only the plotted x-values are shifted. (A backcast prefix showing 2023–2026 against the data is
 # a parked feature.)
@@ -256,7 +257,7 @@ _D050_JS = r"""
 <script>(function () { try {
   var w = window.parent || window, d = w.document, ls = w.localStorage, R = d.documentElement;
   var SNAP = __SNAP__, MIN = __MIN__, MAX = __MAX__, STRIP = __STRIP__, DEF = __DEF__;
-  var SNAP_DEF = __SNAPDEF__;   /* (D-100) the default's magnet radius — see the drag handlers */
+  var SNAP_DEF = __SNAPDEF__;   /* the default's magnet radius — see the drag handlers */
   var FBASE = __FBASE__, FMAX = __FMAX__, FCANVAS = __FCANVAS__, PWREM = __PWREM__;
   var NARROW = __NARROW__, PHONE = __PHONE__;   /* (D-051) responsive-mode viewport thresholds */
 
@@ -727,12 +728,14 @@ def _layout_css(light):
     topbar_bg = "#ffffff" if light else "#0e1117"
     panel_bg = "#f0f2f6" if light else "#262730"
     text_col = "#31333F" if light else "#fafafa"
+    # (D-050 owns the panel-width variable below, D-063 the accent pair; the tags stay in these
+    # Python comments rather than inside the emitted CSS, which every visitor can view-source.)
     css = """
         <style>
-          /* D-050: the ONE panel-width variable. The shim overrides it inline on <html>
+          /* The ONE panel-width variable. The shim overrides it inline on <html>
              (persisted in localStorage); this rule is only the first-paint default. */
           :root { --charts-w: __PANEL_W__; --sb-w: __PANEL_W__; }
-          /* D-063: ONE source of truth for the interactive accent (leader-blue, BLUE at the top
+          /* ONE source of truth for the interactive accent (leader-blue, BLUE at the top
              of this module). Theme-independent, so it is static in :root. `--accent` for hex
              contexts (color/background/border), `--accent-rgb` for rgba() tint+outline fills.
              NB: the go.Scatter / add_hline colours in views.py stay Python hex (BLUE & co.) —

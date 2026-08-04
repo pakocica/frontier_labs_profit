@@ -3,7 +3,10 @@
 `sample_params` draws from `PARAM_RANGES` **jointly**, independently per parameter, and
 `monte_carlo` runs `simulate` on each draw. Draws whose implied bill growth falls outside
 `BILL_COHERENCE` are rejected and redrawn: the compute-growth and price-decline draws jointly
-imply a bill-growth rate, and an incoherent pair would be a scenario no observer has seen.
+imply a bill-growth rate, and an incoherent pair would be a scenario no observer has seen. Since
+D-129 the same test runs at the OTHER end of the compute curve — the floor and the price leg
+jointly imply a long-run budget growth, which `FLOOR_COHERENCE` holds to something an asymptote
+can support. Both are enforced in `mc_draw_batch` (the widget's path) and share one reject count.
 
 `sample_params` is the legacy whole-parameter path (every `PARAM_RANGES` key); `mc_draw_batch` is
 what the widget runs, drawing in TARGET space wherever a target exists and inverting per draw. The
@@ -23,7 +26,35 @@ from model_profit import headline, simulate
 # imply hardware getting more expensive, or improving twice as fast as any observed series, so
 # they are REJECTED and redrawn -- and the rejection count is reported, never silently truncated.
 BILL_COHERENCE = (2.0, 2.9)
+
+# The SAME constraint at the other end of the curve (D-129 rider (a), ratified by Pavel with the
+# floor's recalibration). The floor is now calibrated AS a pair of legs -- hardware
+# price-performance plus real budget growth -- so 10^(g_C_inf - g_p) is the draw's implied
+# long-run budget growth, exactly as 10^(g_C0 - g_p) is its near-term bill growth. The two dials
+# are still drawn INDEPENDENTLY, so corner draws pair the floor's top with the price leg's bottom
+# and assert a training budget compounding at +21 %/yr forever, or the reverse at -16 %/yr.
+# Neither is an asymptote; both are rejected and redrawn, and the rejection count is reported the
+# way the bill's is.
+#
+# The band is [0.95, 1.15]: a budget shrinking slightly faster than the stagnation reading, up to
+# the optimist's own 10 %/yr with room for the price leg's own spread. It is deliberately WIDER
+# than the calibrated spot's +2.33 %/yr, because the point is to exclude incoherent corners, not
+# to pin the ratio at its default.
+#
+# NOT the structural alternative (drawing the floor as `scale_of` the price leg, which would make
+# incoherence impossible): the product of t_price_x's envelope [1.25, 1.55] with a [1.00, 1.10]
+# budget band is [1.25, 1.705], which does not fit inside the floor's menu-witnessed envelope --
+# adopting it would mean deriving the envelope from the leg product rather than from the menu
+# union, against D-109's direction of fit. That branch waits on g_p acquiring an asymptote of its
+# own, at which point the two must be re-ratified together.
+FLOOR_COHERENCE = (0.95, 1.15)
 _COHERENCE_TRIES = 50
+
+# D-120: the two targets whose inversion runs LAST in a draw, after the coherence test has
+# accepted it. They are the value dials, stated in x/yr (D-133) and converted through the leader's
+# capability speeds -- and the asymptotic one's denominator is the SIMULATED speed at the
+# horizon, which makes it the one genuinely expensive step in a draw. See `_one_draw`.
+_VALUE_TARGETS = ('t_value_growth', 't_value_growth_inf')
 
 def bill_growth(p):
     """Implied training-bill growth today, x/yr = 10^(g_C0 - g_p). A read-out, not a dial: the
@@ -34,6 +65,17 @@ def bill_growth(p):
 def bill_coherent(p, band=BILL_COHERENCE):
     """Does this draw's implied bill growth sit inside the observed band?"""
     return bool(band[0] <= bill_growth(p) <= band[1])
+
+def floor_budget_growth(p):
+    """Implied LONG-RUN real training-budget growth, x/yr = 10^(g_C_inf - g_p) (D-129). The
+    asymptotic twin of `bill_growth`, and an exact read-out for the same reason: the model has
+    exactly one price series, so whatever the floor is set to names an implied budget growth
+    whether the card says so or not. At the calibration it is 1.0233 -- +2.33 %/yr real."""
+    return float(10.0**(p.g_C_inf - p.g_p))
+
+def floor_coherent(p, band=FLOOR_COHERENCE):
+    """Does this draw's implied FLOOR-era budget growth sit inside the coherent band?"""
+    return bool(band[0] <= floor_budget_growth(p) <= band[1])
 
 def _draw_one(kind_args, rng, drawn):
     kind = kind_args[0]
@@ -120,7 +162,8 @@ def _draw_dict(rng):
 
 
 def mc_draw_batch(p_base, n, seed=0, n_points=200, sample_keys=None, merge_delta=False,
-                  target_ranges=None, param_ranges=None, coherence=BILL_COHERENCE):
+                  target_ranges=None, param_ranges=None, coherence=BILL_COHERENCE,
+                  floor_coherence=FLOOR_COHERENCE):
     """Per-draw records for the live Monte-Carlo view. Each record carries the sampled values,
     the (downsampled) trajectories the widget plots, and a few headline scalars.
 
@@ -133,7 +176,13 @@ def mc_draw_batch(p_base, n, seed=0, n_points=200, sample_keys=None, merge_delta
     downsampled to <= n_points points; every draw shares the same time grid (T, dt from p_base).
 
     D-076: each accepted record carries `rejects` -- how many draws were discarded before it by
-    the bill-growth coherence constraint (see BILL_COHERENCE). Pass coherence=None to disable."""
+    the bill-growth coherence constraint (see BILL_COHERENCE). Pass coherence=None to disable.
+
+    D-129 added the SECOND constraint, at the other end of the compute curve: the draw's implied
+    LONG-RUN budget growth 10^(g_C_inf - g_p) must sit inside FLOOR_COHERENCE. One `rejects`
+    counter covers both -- a draw is accepted when it is coherent at both ends, and the count is
+    what it always was, the number of draws thrown away before this one. Pass
+    floor_coherence=None to disable it alone."""
     # target_ranges / param_ranges: optional overrides (e.g. user-narrowed sampling ranges,
     # layered over the module defaults by the widget); None -> the module-level dicts.
     TR = TARGET_RANGES if target_ranges is None else target_ranges
@@ -148,14 +197,25 @@ def mc_draw_batch(p_base, n, seed=0, n_points=200, sample_keys=None, merge_delta
     idx = None
 
     def _one_draw():
-        """One joint draw -> (Params, drawn dict, targets dict). No acceptance test here."""
+        """One joint draw -> (Params, drawn, targets, inv), everything EXCEPT the value legs.
+        No acceptance test here.
+
+        D-120 SPLIT THE VALUE LEGS OFF, for cost and nothing else. The acceptance test below
+        (bill coherence) reads g_C0 and g_p only, while the asymptotic value dial's inversion is
+        the expensive step in the whole draw -- it integrates the leader to the horizon. Rejected
+        draws used to pay for it; now they do not. The split is EXACTLY neutral on the result:
+        it consumes no rng (every draw happens above), and `invert_targets` gives the value legs
+        the same context either way, because they read the capability speeds this call has
+        already fixed and nothing reads nu or nu_inf back. Verified bit-identical over 24 draws
+        at both inversion branches before it was committed."""
         drawn = {}
         for k in raw_plain:
             drawn[k] = _draw_one(PR[k], rng, drawn)
         targets = {tk: float(_draw_one(TR[tk], rng, {})) for tk in tkeys}
         # invert the non-lag targets first, so scale_of raws (g_a_F ~ g_a) couple to the DRAWN
         # effective-compute target; then draw those raws; then the lag inversion (which needs them).
-        t1 = {k: v for k, v in targets.items() if k != 't_lag_mo'}
+        t1 = {k: v for k, v in targets.items()
+              if k != 't_lag_mo' and k not in _VALUE_TARGETS}
         inv = invert_targets(t1, replace(p_base, **drawn), merged=merge_delta)
         for k in raw_scaled:
             ctx = dict(drawn); ctx.update(inv); ctx.setdefault('g_a', p_base.g_a)
@@ -163,15 +223,30 @@ def mc_draw_batch(p_base, n, seed=0, n_points=200, sample_keys=None, merge_delta
         t2 = {k: v for k, v in targets.items() if k == 't_lag_mo'}
         if t2:
             inv.update(invert_targets(t2, replace(p_base, **drawn, **inv), merged=merge_delta))
-        return replace(p_base, **drawn, **inv), drawn, targets
+        return replace(p_base, **drawn, **inv), drawn, targets, inv
+
+    def _with_value_legs(p, drawn, targets, inv):
+        """The value legs of an ACCEPTED draw (D-120) -- see `_one_draw`."""
+        t3 = {k: v for k, v in targets.items() if k in _VALUE_TARGETS}
+        if not t3:
+            return p
+        inv.update(invert_targets(t3, p, merged=merge_delta))
+        return replace(p_base, **drawn, **inv)
+
+    def _accept(p):
+        """Both coherence tests, at the two ends of the compute curve (D-076 + D-129). Each is
+        skippable on its own; both read only g_C0 / g_C_inf / g_p, all of which `_one_draw` has
+        already fixed, so the D-120 value-leg split still runs after acceptance."""
+        return ((coherence is None or bill_coherent(p, coherence))
+                and (floor_coherence is None or floor_coherent(p, floor_coherence)))
 
     for _ in range(n):
         rejects = 0
-        p, drawn, targets = _one_draw()
-        while coherence is not None and not bill_coherent(p, coherence) \
-                and rejects < _COHERENCE_TRIES:
+        p, drawn, targets, inv = _one_draw()
+        while not _accept(p) and rejects < _COHERENCE_TRIES:
             rejects += 1
-            p, drawn, targets = _one_draw()
+            p, drawn, targets, inv = _one_draw()
+        p = _with_value_legs(p, drawn, targets, inv)
         s = simulate(p)
         if idx is None:
             nt = len(s['t']); k = max(1, int(np.ceil(nt / n_points)))

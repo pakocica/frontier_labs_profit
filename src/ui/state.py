@@ -169,7 +169,18 @@ def _reset_all():
 # (Meta struck, labs-favourable corner). The trust-the-spike corner (52–63%) is deliberately
 # EXCLUDED — costs-025/026 reject its premise, and it is the only route back above the retired
 # default. Notes/calibration/param_docs/12_FIN4_resolution.md §6.1.
-APP_RANGES = {"cov0": ("uniform", 26.0, 46.0)}
+#
+# D-128 GAVE THE CEILING ITS EXACT VALUE, 100·30.1/65 = 46.3077…%, where it had been the rounded
+# 46.0. Not a re-ratification: the labs-favourable corner is back on the menu as a hidden-tier
+# ROW, and under the two-tier rule the envelope is the union of the choosable rows — so the top
+# end is that row's own number, bitwise, and `_fmt3` renders it "46.3" everywhere it is shown.
+# Worth +0.3 pp of reach on the dial and nothing else. The FLOOR is untouched: it was already the
+# Google-struck row rounded down, and rounding a floor down is containment, not a missing witness.
+#
+# APP_SIM_DEFAULT is deliberately NOT moved with it. The envelope is what the dial may reach; the
+# tight band is the ratified default DRAW (SB6/D-104), and a menu row has never set one — the same
+# separation SIM_DEFAULT keeps on the notebook side.
+APP_RANGES = {"cov0": ("uniform", 26.0, 100.0 * 30.1 / 65.0)}
 APP_SIM_DEFAULT = {"cov0": ("uniform", 26.0, 46.0)}
 
 
@@ -217,11 +228,16 @@ def _tbounds_of(rng):
 
     A `choice` dimension's endpoints are the SMALLEST and LARGEST option (Pavel: "I don't see a
     problem with clicking on descrete point on a line. There won't be interval, MC uses spot value
-    for this parameter."). This branch is what reverses 650bdba: η is the only choice dimension,
+    for this parameter."). This branch is what reverses 650bdba: η was the only choice dimension,
     its option list was handed to `float(rng[1])` as if it were a scalar bound, and one click on
-    η's » raised TypeError and took the page down. The rail is drawn DISCRETELY from these
-    endpoints — dots at the options, no bracket and no crop band — rather than suppressed, so the
-    two documented η readings are clickable again."""
+    η's » raised TypeError and took the page down. The rail was then drawn DISCRETELY from these
+    endpoints — dots at the options, no bracket and no crop band — rather than suppressed.
+
+    D-125 made η CONTINUOUS, so no shipped dimension is a `choice` any more and this branch is
+    DORMANT. It is kept rather than deleted: removing the discrete-rail machinery outright is
+    Pavel's own call (the rail was his reversal of 650bdba) and D-125 did not rule on it, and a
+    kind the loader can still be handed must not become a TypeError again. The substance of his
+    instruction survives regardless — η's sources still place dots on a rail, an ordinary one."""
     if rng[0] == "choice":                    # ('choice', [values...])
         vals = [float(v) for v in rng[1]]
         return min(vals), max(vals)
@@ -245,8 +261,10 @@ def _tbounds(tkey):
 # spot values." Before this the thirteen free dials ran on TWO conventions that had to be read
 # one at a time: five bounded exactly at the envelope (X-12/D-084 — a spot outside it snapped on
 # entering Monte-Carlo mode, and the far end was unreachable) and eight hand-set wider (D-079).
+# (Twelve dials since D-127 removed ℓ; the count above is the one the rule was written against
+# and is left as the historical statement of what it replaced.)
 #
-# THE RULE, as code rather than as thirteen literals, so a re-vetted envelope propagates and the
+# THE RULE, as code rather than as a table of literals, so a re-vetted envelope propagates and the
 # convention cannot rot into a table of numbers nobody can re-derive: pad each side by 10% of the
 # ENVELOPE WIDTH and round OUTWARD to the dial's own step. Rounding to the step is not a detail —
 # R11's own worked example put γ's top at 0.19, which is not on γ's 0.02 grid and so could never
@@ -255,9 +273,10 @@ def _tbounds(tkey):
 # have a model DOMAIN, not just a calibration range.
 #
 # R11's principle, which is why nothing here is "just usability": *a dial should not offer a value
-# the calibration cannot defend.* So this SHRINKS eight dials — most visibly ℓ, which loses the
-# 3.0-yr tail Pavel struck ("3 years sound like too much, you should disregard calibration options
-# that are too questionable. This is too extreme") — and widens five by a little.
+# the calibration cannot defend.* So this SHRINKS eight dials and widens five by a little. (Its
+# most visible shrink was ℓ, which lost the 3.0-yr tail Pavel struck — "3 years sound like too
+# much, you should disregard calibration options that are too questionable. This is too extreme".
+# ℓ itself went in D-127; the rule that answered him applies unchanged to the rest.)
 #
 # NOT applied to the seven TARGET rows: their bounds are `_tbounds`, the envelope exactly, and are
 # shared with the trim lane whose commit clamps to that same envelope (`_commit_range_s`). Padding
@@ -269,39 +288,61 @@ def _tbounds(tkey):
 #   p0_c/p0_w/p0_F  slope_span raises outside (0, 50)% — 0 is an unstarted transition with
 #                   infinite slope — so the floor is the first grid point above 0;
 #   x_mid/t_mid/t_mid_F  the curve's slope is span/u_mid, so a zero midpoint divides by zero;
-#   gamma           0 is admissible and MEANINGFUL (it is the freeze switch), negative is not.
+#   gamma           0 is admissible and MEANINGFUL (it is the freeze switch), negative is not;
+#   beta0           the same shape, and D-132 is when it started to bite. While the envelope was
+#                   [0.10, 0.50] the 10% pad landed at 0.05 and no floor was needed; widening it
+#                   to the menu union [0.04, 3.00] makes the pad 0.296 and the padded bottom
+#                   −0.30. A NEGATIVE beta0 is not a low assistance level, it is a different
+#                   model: psi = 1 + beta0*10^(gamma x) with beta0 < 0 DECREASES in capability,
+#                   which no source claims, and beta0 = −1 divides by zero at psi(0). 0 is the
+#                   admissible end and it is meaningful — it is the model's honest
+#                   representation of "no net uplift today", which is what METR's negative RCTs
+#                   report and what CAL_SOURCES['beta0'] shows as structurally unrepresentable.
+#                   This is exactly the case the paragraph above predicted: an additive pad on
+#                   an envelope whose width dwarfs its floor lands below zero.
 # The rest have no reachable floor: their padded bound already lands inside the domain.
+#
+# `ceil` is the mirror, added by D-125 for the first dial that has a model CEILING rather than a
+# model floor:
+#   eta             η = 1 is the CES family's mathematical top — σ = 1/(1−η) is NEGATIVE above it,
+#                   which is not a substitution elasticity — and R11's 10% pad on a width-2.20
+#                   envelope would otherwise reach +1.25 and put σ < 0 on the slider.
+# The asymmetry the schema had before this was an accident of which dials existed, not a
+# principle: a domain end is a domain end whichever side it sits on.
 _DIAL_SPEC = {
-    # key:        (step, floor)
-    "p0_c":       (1.0, 1.0),
-    "p0_w":       (1.0, 1.0),
-    "p0_F":       (1.0, 1.0),
-    "x_mid":      (0.5, 0.5),
-    "g_a_F":      (0.01, None),
-    "t_mid":      (0.1, 0.1),
-    "t_mid_F":    (0.1, 0.1),
-    "beta0":      (0.05, None),
-    "gamma":      (0.02, 0.0),
-    "ell":        (0.05, None),
-    "g_CF0":      (0.05, None),
-    "g_CF_inf":   (0.01, None),
-    "split":      (0.05, None),
+    # key:        (step, floor, ceil)
+    "p0_c":       (1.0, 1.0, None),
+    "p0_w":       (1.0, 1.0, None),
+    "p0_F":       (1.0, 1.0, None),
+    "x_mid":      (0.5, 0.5, None),
+    "g_a_F":      (0.01, None, None),
+    "t_mid":      (0.1, 0.1, None),
+    "t_mid_F":    (0.1, 0.1, None),
+    "eta":        (0.05, None, 1.0),
+    "beta0":      (0.05, 0.0, None),
+    "gamma":      (0.02, 0.0, None),
+    "g_CF0":      (0.05, None, None),
+    "g_CF_inf":   (0.01, None, None),
+    "split":      (0.05, None, None),
 }
 
 
 def dial(key):
-    """(lo, hi, step) for a free dial under R11 — the padded envelope, rounded out to the step.
+    """(lo, hi, step) for a free dial under R11 — the padded envelope, rounded out to the step,
+    then clipped to the model's own domain at either end.
 
     The ±1e-9 is fp hygiene, not slack: an endpoint that lands exactly on the grid must stay
     there, and (0.5 − 0.04)/0.01 evaluating to 45.999999999 would otherwise cost a whole step.
     Real non-grid values are orders of magnitude further from an integer than this."""
-    step, floor = _DIAL_SPEC[key]
+    step, floor, ceil = _DIAL_SPEC[key]
     e_lo, e_hi = _tbounds_of(_base_rng(key))
     pad = 0.10 * (e_hi - e_lo)
     lo = round(float(np.floor((e_lo - pad) / step + 1e-9) * step), 10)
     hi = round(float(np.ceil((e_hi + pad) / step - 1e-9) * step), 10)
     if floor is not None:
         lo = max(lo, floor)
+    if ceil is not None:
+        hi = min(hi, ceil)
     return lo, hi, step
 
 

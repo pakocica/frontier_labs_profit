@@ -39,6 +39,7 @@ from dataclasses import dataclass, field, replace                        # noqa:
 
 from model_params import (                                               # noqa: F401
     G_C_TODAY, Params,
+    VALUE_GROWTH_ANCHOR, VALUE_GROWTH_INF_ANCHOR,
     TARGET_PARAM, TARGET_RANGES, PARAM_RANGES, SIM_DEFAULT,
     lognormal_from_ci, dist_bounds,
 )
@@ -50,17 +51,19 @@ from model_dynamics import (                                             # noqa:
     psi, psi_boost_share, slope_span,
 )
 from model_profit import (                                               # noqa: F401
-    W, W_exp_approx, _rk4_follower_fine, _rk4_leader_fine, _xR_of,
-    conduct_mult, cost_flow, delay_comparison, gap_index, headline, simulate, w_log,
+    COHERENCE_TOL_OOM, W, W_exp_approx, _rk4_follower_fine, _rk4_leader_fine, _sim_pad, _xR_of,
+    coherent_x_mid, conduct_mult, cost_flow, delay_comparison, gap_index, headline,
+    implied_value_multiple, leader_horizon_state, simulate, value_coherence, w_log,
 )
 from model_calibration import (                                          # noqa: F401
-    _DELTA_ALGO_SHARE, _DELTA_DEV_DEFAULT, _PB, _SB, _TD0, MERGED_DELTA_RANGE,
-    base_params, channels_from_lag, invert_targets, split_delta, stationary_catchup,
-    target_defaults, xdot_L0,
+    _DELTA_ALGO_SHARE, _DELTA_DEV_DEFAULT, _PB, _SB, _TD0, _XDOT_T_CACHE, MERGED_DELTA_RANGE,
+    base_params, channels_from_lag, growth_mult_of_slope, invert_targets, slope_of_growth_mult,
+    split_delta, stationary_catchup, target_defaults, xdot_L0, xdot_L_T,
 )
 from model_montecarlo import (                                           # noqa: F401
-    BILL_COHERENCE, _COHERENCE_TRIES, _draw_dict, _draw_one,
-    bill_coherent, bill_growth, mc_draw_batch, monte_carlo, sample_params,
+    BILL_COHERENCE, FLOOR_COHERENCE, _COHERENCE_TRIES, _VALUE_TARGETS, _draw_dict, _draw_one,
+    bill_coherent, bill_growth, floor_budget_growth, floor_coherent,
+    mc_draw_batch, monte_carlo, sample_params,
 )
 
 # The source MENUS live in `cal_sources.py` since D-110. Calibration evidence is declarative data,
@@ -74,7 +77,26 @@ from cal_sources import (                                            # noqa: E40
 )
 
 
-# gamma's menu row carries the LIVE Params default rather than a second copy of it (D-091).
-# cal_sources.py imports nothing, model.py included, so the binding is made here — the first
-# point where both the table and Params are in scope.
-bind_live_defaults(gamma=Params().gamma)
+# A menu row whose value IS a live model default carries the default rather than a second copy
+# of it (D-091). cal_sources.py imports nothing, model.py included, so the binding is made here —
+# the first point where both the table and the model are in scope.
+#
+# D-120 adds the two value dials to the binding for a reason D-109 states as a rule: the DEFAULT
+# row must carry the dial's value bitwise, so that clicking it restores the calibrated spot
+# exactly. In ×/OOM the pooled row could hold a literal 2.1; as a growth rate the same spot was
+# 118.68…%/yr, a number that depends on the leader's own t = 0 and horizon speeds, so a literal
+# here would have been a second copy of a derived quantity — exactly the two-literals defect γ's
+# row hit.
+#
+# D-118 RIDER (Pavel, 2026-08-02) INVERTS THE DERIVATION and with it what belongs on the card. The
+# ruled observables are the round rates — ×2.19/yr and ×1.10/yr since D-133 re-keyed the unit,
+# 119 and 10 %/yr in the unit they were ruled in — and ν / ν_∞ are THEIR images, so the anchors
+# are the primitives and binding them here is not a second literal, it is the only one. `_TD0` is
+# asserted to reproduce them (test_model), which is what keeps this honest. Under D-133 BOTH legs
+# round-trip bitwise: the ×/yr forward map is 10^(ν·ẋ) and returns 2.19 and 1.10 exactly, where
+# the %/yr map's 100·(10^y − 1) could not land on 10.0 at all and left the asymptotic leg 5 ulp
+# out. Binding the anchor puts the ruling on the card and restores ν_∞ bitwise either way.
+bind_live_defaults(gamma=Params().gamma,
+                   t_value_growth=VALUE_GROWTH_ANCHOR,
+                   t_value_growth_inf=VALUE_GROWTH_INF_ANCHOR,
+                   alpha=Params().alpha, eta=Params().eta)
