@@ -1,90 +1,13 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <script>
-    /* (D-057, gated D-072) Phone routing. A phone / small touch screen is ALWAYS guide-only:
-       send it to the static title landing (mobile.html) BEFORE the ~30–60s Pyodide download
-       begins. The interactive explorer (Pyodide widget + the tour deck) is a laptop/desktop
-       experience and overflows a narrow screen, so there is NO ?full / flp_full escape for a
-       coarse+small screen — that escape is exactly how a phone previously ended up loading the
-       broken-on-mobile app (Pavel's report). A coarse (touch) pointer is REQUIRED, so a desktop
-       / fine-pointer window in a short or narrow size is UNAFFECTED and keeps the full app
-       (incl. the D-064 horizontal scroll). Runs first in <head>, before any heavy asset loads. */
-    (function () {
-      try {
-        var coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
-        var minInner = Math.min(window.innerWidth || 9999, window.innerHeight || 9999);
-        var minScreen = (window.screen && screen.width && screen.height)
-          ? Math.min(screen.width, screen.height) : 9999;
-        var small = Math.min(minInner, minScreen) < 640;
-        if (coarse && small) { location.replace("./mobile.html"); }
-      } catch (e) {}
-    })();
-  </script>
-  <title>Frontier-AI-lab competition — interactive explorer</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/browser@1.8.1/build/stlite.css" />
-  <!-- shared tour deck styling + the laptop overlay chrome (D-058) -->
-  <link rel="stylesheet" href="./tour.css?v=3" />
-  <link rel="stylesheet" href="./intro.css?v=7" />
-  <style>
-    html, body, #root { margin: 0; padding: 0; height: 100%; }
-    /* critical inline fallback: the intro overlay must paint IMMEDIATELY, before
-       tour.css/intro.css land (no blank flash on a cold load). intro.js replaces
-       this content with the full deck / minimal card as soon as it runs. */
-    #intro { position: fixed; inset: 0; z-index: 1000000; background: #0e1117; color: #e6e6df;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: .6rem; padding: 1rem;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    #intro .i-boot-title { font-size: 1.5rem; font-weight: 700; text-align: center; }
-    #intro .i-boot-sub { font-size: .85rem; opacity: .7; max-width: 30rem; text-align: center; }
-    @media (prefers-color-scheme: light) { #intro { background: #ffffff; color: #31333f; } }
-  </style>
-</head>
-<body>
-  <!-- Intro-tour overlay (D-058): instant minimal cover; tour.js + intro.js expand it
-       into the full deck (first visit) or a minimal loading card (return visit), shown
-       ON TOP of the widget while it boots (widget blurred behind). The tour is optional —
-       an always-present × / ready button lets the user leave anytime. tour.{js,css},
-       intro.{js,css} live at the repo ROOT, OUTSIDE the src/ tree deploy/sync.sh rewrites. -->
-  <div id="intro">
-    <div class="i-boot-title">Will frontier AI labs be profitable?</div>
-    <div class="i-boot-sub">Preparing the interactive explorer — runs entirely in your
-      browser (Python via WebAssembly), nothing is sent to a server.</div>
-  </div>
-  <div id="root"></div>
-  <script src="./tour.js?v=4" defer></script>
-  <script src="./intro.js?v=8" defer></script>
-  <script type="module">
-    import { mount } from "https://cdn.jsdelivr.net/npm/@stlite/browser@1.8.1/build/stlite.js";
-    import { APP_FILES } from "./app_files.js";
-
-    // Mount every synced source file at its widget-relative path (src/ stripped).
-    const files = {};
-    for (const p of APP_FILES) {
-      files[p.replace(/^src\//, "")] = { url: "./" + p };
-    }
-
-    mount(
-      {
-        entrypoint: "app.py",
-        requirements: ["numpy", "plotly"],
-        files,
-        // The intro overlay renders its own staged progress; stlite's toasts would
-        // just flash underneath it.
-        disableProgressToasts: true,
-        streamlitConfig: {
-          "theme.light.primaryColor": "#4c8dff",
-          "theme.dark.primaryColor": "#4c8dff",
-          "client.toolbarMode": "viewer",
-        },
-      },
-      document.getElementById("root"),
-    );
-    // intro.js watches for Streamlit's first real paint to flip the overlay's boot
-    // button to "ready"; the overlay itself is dismissed only by the user (× / button /
-    // backdrop-after-ready), never automatically.
-  </script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Are frontier AI labs profitable?</title>
+    <script type="module" crossorigin src="./assets/index-BkTJWicR.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Cb6kUtUY.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
 </html>
