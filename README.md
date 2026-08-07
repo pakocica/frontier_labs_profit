@@ -19,8 +19,8 @@ beyond the page itself.
   content-hashed, so the directory is replaced wholesale on every deploy.
 - `model_note.pdf` — the written model note, shipped with every deploy so the public
   write-up always matches the deployed app.
-- `mobile.html`, `tour.{js,css}` — the guided introduction, a slideable deck the app's
-  masthead links to.
+- `mobile.html`, `tour.{js,css}` — the old phone deck, retired and unadvertised; it still
+  ships so its URL keeps answering.
 - `.nojekyll` — Pages serves this tree verbatim.
 
 This repository only hosts the deployable snapshot; the app is developed in the
