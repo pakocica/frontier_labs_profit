@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Will frontier AI labs be profitable? An interactive economic model of frontier-AI-lab competition — a guided introduction; the interactive explorer is on a laptop.">
+<title>Will Frontier AI Labs Be Profitable?</title>
+<!-- Shared tour styling (tokens + slides + navigator) — the SAME deck the laptop uses, so the
+     phone shows identical content, single-sourced from tour.js. See deploy/tour.css / tour.js. -->
+<link rel="stylesheet" href="./tour.css?v=3">
+<style>
+  /* ============================================================================
+     Phone guide (D-073) — ORIENTATION-RESPONSIVE, and GUIDE-ONLY (no widget, no
+     Pyodide, no #root, ever). This page is only ever reached by a coarse+small
+     screen (index.html redirect), so:
+       • PORTRAIT  → the full shared tour deck, full-screen, swipeable — TERMINAL:
+                     no "go to the widget", no ×/close, no backdrop dismiss.
+       • LANDSCAPE → a simple one-page title (a landscape phone is too short for
+                     the deck).
+     All rules here are page-local; the laptop overlay (intro.*) is untouched.
+     ========================================================================== */
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: var(--sans); color: var(--ink); background: var(--bg);
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; overflow: hidden;
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+  /* ---- orientation switch: portrait shows the deck, landscape shows the title ----
+     Display is toggled ONLY by these bare-selector media queries. The deck's flex
+     layout below sets flex-DIRECTION (not display) so it can't out-specify this
+     toggle (an earlier bug: #deck.flp-deck{display:flex} beat @media #deck{display:none}). */
+  #deck  { display: none; }
+  .guide { display: none; }
+  @media (orientation: portrait)  { #deck  { display: flex; } }
+  @media (orientation: landscape) { .guide { display: flex; } }
+
+  /* ------------------------------------------------------------ PORTRAIT: deck -- */
+  /* THE FIT FIX: lay the deck out as a flex column so the slide track scrolls within
+     its OWN bounds and the navigator sits in normal flow BELOW it — a dense slide's
+     body can never overlap the dots/arrows (the old bug was the nav absolutely
+     overlaid on top of full-height slides). Scoped to #deck, so tour.css and the
+     laptop overlay are unchanged. */
+  #deck { height: 100vh; height: 100dvh; background: var(--stage); flex-direction: column; }
+  #deck .track { flex: 1 1 auto; min-height: 0; height: auto; }   /* the scroll region */
+  #deck .nav   { position: relative; flex: 0 0 auto; background: transparent; }
+
+  /* phone-tuned slide padding; the bottom no longer has to clear an overlapping nav */
+  #deck .slide      { padding: clamp(26px, 6vh, 52px) clamp(20px, 6vw, 30px) clamp(16px, 3vh, 26px); }
+  #deck .slide-top  { margin-bottom: clamp(16px, 3vh, 26px); }
+  #deck .slide-body { gap: clamp(13px, 2.4vh, 20px); }
+
+  /* short portrait (small phones) — tighten type/spacing so even the densest slide
+     fits without needing much (or any) scroll, and never crowds the navigator */
+  @media (orientation: portrait) and (max-height: 720px) {
+    #deck .slide      { padding-top: clamp(20px, 4vh, 34px); padding-bottom: 14px; }
+    #deck .slide-top  { margin-bottom: 16px; }
+    #deck .slide-body { gap: 12px; }
+    #deck .title      { font-size: clamp(23px, 6vw, 29px); }
+    #deck .slide[data-kind="cover"] .title { font-size: clamp(29px, 8.4vw, 38px); }
+    #deck .gloss      { font-size: 14.5px; line-height: 1.5; }
+    #deck .eq         { padding: 16px 16px; min-height: 0; font-size: clamp(17px, 4.8vw, 21px); }
+    #deck .list       { gap: 12px; }
+    #deck .list span:last-child { font-size: 14px; }
+    #deck .params li  { padding: 10px 0; }
+    #deck .params .note { font-size: 12.5px; }
+  }
+
+  /* ---------------------------------------------------------- LANDSCAPE: title -- */
+  /* the clean D-072 title composition, shown only when the phone is landscape */
+  .guide {
+    min-height: 100vh; min-height: 100dvh;
+    flex-direction: column; background: var(--stage);
+  }
+  .guide .hero {
+    flex: 1 1 auto; min-height: 0;
+    display: flex; flex-direction: column; justify-content: center;
+    gap: clamp(10px, 3vh, 20px);
+    padding: clamp(18px, 5vh, 34px) clamp(24px, 6vw, 52px) 0;
+  }
+  .guide .eyebrow {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--follower); display: flex; align-items: center; gap: 10px;
+  }
+  .guide .eyebrow::after {
+    content: ""; flex: 1 1 auto; height: 1px;
+    background: repeating-linear-gradient(90deg, var(--line) 0 6px, transparent 6px 12px);
+  }
+  .guide .q-title {
+    margin: 0; font-weight: 700; letter-spacing: -.022em; line-height: 1.05; text-wrap: balance;
+    color: var(--ink); font-size: min(40px, 5.4vw, 8.4vh);
+  }
+  .guide .q-sub {
+    margin: 0; color: var(--muted); line-height: 1.5; max-width: 68ch; text-wrap: pretty;
+    font-size: clamp(13.5px, 2.4vw, 16px);
+  }
+  .guide .q-sub .lead { color: var(--accent);   font-weight: 600; }
+  .guide .q-sub .foll { color: var(--follower); font-weight: 600; }
+  .guide .foot {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 11px;
+    padding: clamp(10px, 3vh, 18px) clamp(24px, 6vw, 52px) calc(clamp(14px, 4vh, 22px) + env(safe-area-inset-bottom, 0px));
+    color: var(--faint); font-family: var(--mono); font-size: 11.5px; letter-spacing: .03em; line-height: 1.5;
+  }
+  .guide .foot::before { content: ""; width: 22px; height: 1px; background: currentColor; flex: 0 0 auto; opacity: .7; }
+  /* the shared note link, kept to a readable column on a wide landscape phone */
+  #guide-note .note-link { max-width: 30rem; }
+</style>
+</head>
+<body>
+
+  <!-- PORTRAIT: the full slideable intro deck (built into this host by FLPTour.mountDeck) -->
+  <div id="deck"></div>
+
+  <!-- LANDSCAPE: a simple one-page title (the deck is too tall for a short landscape phone) -->
+  <main class="guide">
+    <div class="hero">
+      <div class="eyebrow">An interactive model</div>
+      <h1 class="q-title">Will Frontier AI Labs Be Profitable?</h1>
+      <p class="q-sub">A <span class="lead">leader</span> charges a premium for its lead &mdash; a <span class="foll">follower</span> sells the same at cost. When is the lead worth the bill for keeping it?</p>
+      <!-- the model note (D-097): the landscape title has no deck, so the shared link is
+           mounted here by the script below — same href/wording as everywhere else -->
+      <div id="guide-note"></div>
+    </div>
+    <p class="foot">Best on a larger screen &mdash; open on a laptop for the interactive explorer.</p>
+  </main>
+
+  <script src="./tour.js?v=4"></script>
+  <script>
+  (function () {
+    "use strict";
+    // mount the SAME shared deck the laptop uses (env: phone → phone wording + the
+    // phone-only "needs a bigger screen" slide). No widget, no close — terminal.
+    var deck = window.FLPTour.mountDeck(document.getElementById("deck"), { env: "phone" });
+
+    // landscape title view: mount the same model-note link the deck slides carry
+    var gn = document.getElementById("guide-note");
+    if (gn && window.FLPTour.noteHTML) gn.innerHTML = window.FLPTour.noteHTML();
+
+    // arrow keys advance the deck, but only while it's the visible (portrait) view
+    window.addEventListener("keydown", function (e) {
+      if (!window.matchMedia("(orientation: portrait)").matches) return;
+      var track = document.querySelector("#deck .track");
+      if (e.target === track) return;                 // the deck handles its own focused keys
+      if (e.key === "ArrowRight") deck.go(deck.current() + 1);
+      if (e.key === "ArrowLeft")  deck.go(deck.current() - 1);
+    });
+
+    // rotating live: when we return to portrait, re-snap the track to the current slide
+    // (a track measured while hidden in landscape has zero width) — clean swap, no
+    // half-scrolled intermediate. Snap on the next frame (after the layout pass that
+    // gives the track its real width) and once more shortly after, in case layout lags.
+    function resnap() {
+      if (!window.matchMedia("(orientation: portrait)").matches) return;
+      requestAnimationFrame(function () { deck.go(deck.current()); });
+    }
+    function onOrient() { resnap(); setTimeout(resnap, 220); }
+    window.addEventListener("orientationchange", onOrient);
+    window.addEventListener("resize", onOrient);
+  })();
+  </script>
+</body>
+</html>
